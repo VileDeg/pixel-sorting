@@ -1,4 +1,4 @@
-const theme = {
+export const theme = {
   colors: {
     primary: '#61dafb', // Main button color
     secondary: '#282c34', // Header background

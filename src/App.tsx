@@ -7,7 +7,6 @@ import { PixelSorter } from './components/pixelSorter/pixelSorter.tsx'
 const App = () => {
   return (
     <div>
-      <h1>Pure p5.js in React</h1>
       <PixelSorter />
     </div>
   );
