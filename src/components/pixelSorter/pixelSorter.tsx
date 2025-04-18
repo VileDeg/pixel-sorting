@@ -1,7 +1,13 @@
-import { useState, useRef, useEffect, useCallback } from 'react'
+import { useState, useRef, useEffect, useCallback } from 'react';
 import p5 from 'p5';
-import { useDropzone } from 'react-dropzone'
-import { DownloadButton, SortButton } from './styles.ts'
+import { useDropzone } from 'react-dropzone';
+import { useDebouncedCallback } from "use-debounce";
+import { StyledButton } from './styles.ts';
+
+import { SortOrderToggle } from "../sortOrderToggle/sortOrderToggle.tsx";
+import { ThresholdControl } from "../thresholdControl/thresholdControl.tsx";
+
+
 
 export const PixelSorter: React.FC = () => {
   const [imageFile, setImageFile] = useState<File | null>(null);
@@ -10,25 +16,29 @@ export const PixelSorter: React.FC = () => {
 
   const [threshold, setThreshold] = useState(100);  // slider value
 
-  const [rerenderKey, setRerenderKey] = useState(0);
+  const [sortOptions, setSortOptions] = useState({
+    rows: { enabled: true, order: 1 },
+    columns: { enabled: true, order: 2 },
+  });
 
-  const p5ParentRef = useRef(document.createElement('div')); //new HTMLElement
+
+  const p5ParentRef = useRef<HTMLDivElement>(document.createElement('div')); //new HTMLElement
   const p5Ref = useRef<p5 | null>(null);
 
-  const maxCanvasSize = [720, 720];
+  const maskCanvasRef = useRef<HTMLDivElement>(document.createElement('div'));
+  const maskP5Ref = useRef<p5 | null>(null);
 
-  // === Pixel sort
-  let mode = 0;
-
-  //let imgSrc: p5.Image | null = null;            // source image  
+  const defaultCanvasSize = [200, 200];
+  const maxCanvasSize = [640, 640];
 
   const imgSrcPixelsOriginal = useRef<number[]>([]); // stored imgSrc pixels to reapply sort
 
-  //let imgSrcPixels: number[] = []; // packed RGB of source image
+  const sortImagePixelsDebounceDelayMs = 200;
+
   let imgPixels: number[] = [];    // packed RGB of sorted image
 
   // threshold values to determine sorting start and end pixels
-  let blackValue = 0xFF000000;
+  // const blackValue = useRef(0xFF000000);
   let brightnessValue;
   let whiteValue;
 
@@ -55,19 +65,12 @@ export const PixelSorter: React.FC = () => {
 
       p.setup = () => {
         p.pixelDensity(1); // 1 pixel = 1 pixel on canvas
-        p.createCanvas(400, 400);
-      };
-
-      p.draw = () => {
+        let [w, h] = defaultCanvasSize;
+        p.createCanvas(w, h);
         p.background(240);
       };
 
-      // Add this method to p5 instance for saving the canvas
-      // Method redefinition!
-      // p.saveCanvas = () => {
-      //   // Save canvas as PNG with a timestamp
-      //   p.save(`pixel-sorted-${new Date().toISOString().slice(0, 19).replace(/:/g, '-')}.png`);
-      // };
+      p.draw = () => { };
     };
 
     // Create a new p5 instance and attach it to the sketchRef
@@ -80,6 +83,29 @@ export const PixelSorter: React.FC = () => {
       //setIsImageLoaded(false);
     };
   }, []); // No dependency (is run just once)
+
+  // CREATE threshold mask canvas
+  useEffect(() => {
+    const sketch = (p: p5) => {
+      p.setup = () => {
+        p.pixelDensity(1);
+        let [w, h] = defaultCanvasSize;
+        p.createCanvas(w, h);
+        p.background(240);
+      };
+
+      p.draw = () => { };
+    };
+
+    maskP5Ref.current?.remove(); // Clean up previous canvas
+    maskP5Ref.current = new p5(sketch, maskCanvasRef.current);
+
+
+    return () => {
+      maskP5Ref.current?.remove();
+    };
+  }, []); // No dependency (is run just once)
+
 
   // ON IMAGE UPLOAD
   useEffect(() => {
@@ -97,28 +123,8 @@ export const PixelSorter: React.FC = () => {
       // Handle successful image load
       URL.revokeObjectURL(imageUrl);
 
-
       // Resize canvas based on image
-      const [mw, mh] = maxCanvasSize;
-      let ar = loadedImg.width / loadedImg.height;
-      let width = loadedImg.width;
-      let height = loadedImg.height;
-
-
-      console.log("Image size: ", loadedImg.width, loadedImg.height);
-      console.log("Max size: ", maxCanvasSize);
-
-      // Calculate dimensions
-      if (ar >= 1.0 && width > mw) {
-        width = mw;
-        height = width / ar;
-      } else if (ar < 1.0 && height > mh) {
-        height = mh;
-        width = height * ar;
-      }
-
-      console.log("Set canvas size: ", width, height);
-
+      let [width, height] = getCanvasSizeForImage(loadedImg);
       // Resize canvas
       p.resizeCanvas(width, height);
 
@@ -132,7 +138,7 @@ export const PixelSorter: React.FC = () => {
 
       // Override draw function to display image
       p.draw = () => {
-        console.log("Draw (overriden). Render image");
+        // Must stay in draw to be updated on sort!
         p.image(loadedImg, 0, 0, p.width, p.height);
       };
 
@@ -144,28 +150,45 @@ export const PixelSorter: React.FC = () => {
     console.log("IMAGE LOADED: ", imgSrc);
   }, [imageFile]); // , rerenderKey, threshold
 
-  // ON IMAGE LOAD (p5)
-  // useEffect(() => {
-  //   if (!imgSrc) {
-  //     return;
-  //   }
+  // UPDATE threshold mask
+  useEffect(() => {
+    if (!maskP5Ref.current || !imgSrc || !isImageLoaded) {
+      return;
+    }
 
-  //   console.log("useEffect ON IMAGE LOAD (p5)");
-  //   // Store original pixels in case of repeated sort
-  //   //imgSrc.loadPixels();
+    const p = maskP5Ref.current;
 
-  //   for (let i = 0; i < 4 * (imgSrc.width * imgSrc.height); i += 4) {
-  //     imgSrcPixelsOriginal.current[Math.floor(i / 4)] =
-  //       (255 << 24) |
-  //       (imgSrc.pixels[i] << 16) |
-  //       (imgSrc.pixels[i + 1] << 8) |
-  //       (imgSrc.pixels[i + 2]);
-  //   }
+    let maskImage: p5.Image;
 
-  //   //imgSrcPixelsOriginal.current = imgSrc.pixels.slice();
-  //   console.log("useEffect: imgSrc.pixels: ", imgSrc.pixels);
-  //   console.log("useEffect: imgSrcPixelsOriginal: ", imgSrcPixelsOriginal.current);
-  // }, [imgSrc]);
+    maskImage = p.createImage(imgSrc.width, imgSrc.height);
+    let [width, height] = getCanvasSizeForImage(maskImage);
+
+    p.resizeCanvas(width, height);
+
+    const generateMask = () => {
+      maskImage.loadPixels();
+
+      // Compute based on original image (not sorted)
+      let src = imgSrcPixelsOriginal.current;
+
+      for (let i = 0; i < imgSrc.width * imgSrc.height; i++) {
+        const pixelValue = src[i] >= getBlackValue() ? 255 : 0;
+
+        maskImage.pixels[i * 4 + 0] = pixelValue;
+        maskImage.pixels[i * 4 + 1] = pixelValue;
+        maskImage.pixels[i * 4 + 2] = pixelValue;
+        maskImage.pixels[i * 4 + 3] = 255;
+      }
+      maskImage.updatePixels();
+      p.image(maskImage, 0, 0, p.width, p.height);
+    };
+
+
+    generateMask();
+
+    p.draw = () => { }; // static image
+  }, [imgSrc, threshold]); // isImageLoaded
+
 
   const populateOriginalPixels = (imgSrc: p5.Image) => {
     if (!imgSrc) {
@@ -189,10 +212,38 @@ export const PixelSorter: React.FC = () => {
     console.log("useEffect: imgSrcPixelsOriginal: ", imgSrcPixelsOriginal.current);
   }
 
+
+  const getCanvasSizeForImage = (img: p5.Image) => {
+    // Resize canvas based on image
+    const [mw, mh] = maxCanvasSize;
+    let ar = img.width / img.height;
+    let width = img.width;
+    let height = img.height;
+
+
+    console.log("Image size: ", img.width, img.height);
+    console.log("Max size: ", maxCanvasSize);
+
+    // Calculate dimensions
+    if (ar >= 1.0 && width > mw) {
+      width = mw;
+      height = width / ar;
+    } else if (ar < 1.0 && height > mh) {
+      height = mh;
+      width = height * ar;
+    }
+
+    console.log("Set canvas size: ", width, height);
+
+    return [width, height];
+  }
+
+
+
   const uploadImage = (file: File | undefined) => {
     if (file) {
       setImageFile(file);
-      setRerenderKey(0); // 0 means image just loaded
+      //setRerenderKey(0); // 0 means image just loaded
       console.log("handleImageUpload: ", imageFile)
     } else {
       console.error("File is null");
@@ -208,72 +259,132 @@ export const PixelSorter: React.FC = () => {
     }
   };
 
+  const halfSort = (sortRows: boolean) => {
+    if (sortRows) {
+      row = 0;
+      // loop through rows
+      while (row < imgSrc!.height - 1) {
+        sortRow();
+        row++;
+      }
+    } else {
+      column = 0;
+      // loop through columns
+      while (column < imgSrc!.width - 1) {
+        sortColumn();
+        column++;
+      }
+    }
+  };
+
+  const sortImagePixels = () => {
+    imgPixels = imgSrcPixelsOriginal.current.slice();
+
+    if (sortOptions.rows.enabled && sortOptions.rows.order === 1) {
+      // Sort rows first
+      console.log("1 SORTING rows");
+      halfSort(true);
+      if (sortOptions.columns.enabled) {
+        console.log("2 SORTING cols");
+        halfSort(false);
+      }
+    }
+    if (sortOptions.columns.enabled && sortOptions.columns.order === 1) {
+      // Sort columns first
+      console.log("1 SORTING cols");
+      halfSort(false);
+      if (sortOptions.rows.enabled) {
+        console.log("2 SORTING rows");
+        halfSort(true);
+      }
+    }
+    if (!sortOptions.rows.enabled && !sortOptions.columns.enabled) {
+      console.error("Invalid mode.");
+    }
+
+    let imageBytes = 4 * (imgSrc!.width * imgSrc!.height);
+
+    // Update image pixels
+    //imgSrc!.loadPixels();
+    let i = 0;
+    while (i < imageBytes) {
+      let col = imgPixels[Math.floor(i / 4)];
+      imgSrc!.pixels[i++] = col >> 16 & 255;
+      imgSrc!.pixels[i++] = col >> 8 & 255;
+      imgSrc!.pixels[i++] = col & 255;
+      imgSrc!.pixels[i++] = 255;
+    }
+
+    // Push the changes
+    imgSrc!.updatePixels();
+  };
+
+  const sortImagePixelsDebounced =
+    useDebouncedCallback(sortImagePixels, sortImagePixelsDebounceDelayMs);
+
   const handleSortPixels = () => {
     if (!p5Ref.current || !imgSrc) {
       console.error("handleSortPixels did not take effect: ", p5Ref.current, imgSrc);
       return;
     }
     // Update black based on threshold
-    setBlackValue();
+    //setBlackValue();
     // TODO: 
     // Trigger rerender of image
     //setRerenderKey(k => k + 1);
-    console.log("handleSortPixels: imgSrc.pixels: ", imgSrc.pixels);
-    console.log("handleSortPixels: imgSrcPixelsOriginal: ", imgSrcPixelsOriginal.current);
+    // console.log("handleSortPixels: imgSrc.pixels: ", imgSrc.pixels);
+    // console.log("handleSortPixels: imgSrcPixelsOriginal: ", imgSrcPixelsOriginal.current);
 
-    imgPixels = imgSrcPixelsOriginal.current.slice();
-
-    row = 0;
-    column = 0;
-
-    // loop through rows
-    while (row < imgSrc.height - 1) {
-      sortRow();
-      row++;
-    }
-
-    // loop through columns
-    while (column < imgSrc.width - 1) {
-      sortColumn();
-      column++;
-    }
-
-    let imageBytes = 4 * (imgSrc.width * imgSrc.height);
-
-    // Update image pixels
-    //imgSrc.loadPixels();
-    let i = 0;
-    while (i < imageBytes) {
-      let col = imgPixels[Math.floor(i / 4)];
-      imgSrc.pixels[i++] = col >> 16 & 255;
-      imgSrc.pixels[i++] = col >> 8 & 255;
-      imgSrc.pixels[i++] = col & 255;
-      imgSrc.pixels[i++] = 255;
-    }
-
-    // Push the changes
-    imgSrc.updatePixels();
+    sortImagePixels();
   }
 
+  const handleToggleSortOption = (key: 'rows' | 'columns') => {
+    setSortOptions((prev) => {
+      const current = prev[key];
+      const otherKey = key === 'rows' ? 'columns' : 'rows';
+      const other = prev[otherKey];
 
-  const handleThresholdChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    setThreshold(Number(e.target.value));
+      if (current.enabled && other.enabled) {
+        // Disable current, shift other to order 1
+        return {
+          ...prev,
+          [key]: { enabled: false, order: null },
+          [otherKey]: { ...other, order: 1 },
+        };
+      } else if (!current.enabled && !other.enabled) {
+        // Enable current as first (1)
+        return {
+          ...prev,
+          [key]: { enabled: true, order: 1 },
+        };
+      } else if (!current.enabled && other.enabled) {
+        // Enable current as second (2)
+        return {
+          ...prev,
+          [key]: { enabled: true, order: 2 },
+        };
+      } else {
+        // Disabling the only enabled one → keep at least one enabled
+        return prev;
+      }
+    });
   };
 
-  const setBlackValue = () => {
-    console.log("threshold: ", threshold);
+  const handleThresholdChange = (newThreshold: number) => {
+    setThreshold(newThreshold);
 
+    // Auto-sort on change
+    //sortImagePixels();
+    sortImagePixelsDebounced();
+  };
+
+  const getBlackValue = () => {
+    // TODO: maybe refactor to increase performance
     let byte = threshold & 255;
-
-    console.log("byte: ", byte);
-
-    // Fill R G B with threshold byte
     // Full alpha
-    blackValue = byte | byte << 8 | byte << 16 | 255 << 24;
-
-    console.log("handleThresholdChange: Black value: ", blackValue);
+    let blackValue = byte | byte << 8 | byte << 16 | 255 << 24;
+    return blackValue;
   };
-
 
 
   const sortRow = () => {
@@ -289,22 +400,22 @@ export const PixelSorter: React.FC = () => {
     let xend = 0;
 
     while (xend < width - 1) {
-      switch (mode) {
-        case 0:
-          x = getFirstNotBlackX(x, y);
-          xend = getNextBlackX(x, y);
-          break;
-        // case 1:
-        //   x = getFirstBrightX(x, y);
-        //   xend = getNextDarkX(x, y);
-        //   break;
-        // case 2:
-        //   x = getFirstNotWhiteX(x, y);
-        //   xend = getNextWhiteX(x, y);
-        //   break;
-        default:
-          break;
-      }
+      // switch (mode) {
+      //   case 0:
+      x = getFirstNotBlackX(x, y);
+      xend = getNextBlackX(x, y);
+      //break;
+      // case 1:
+      //   x = getFirstBrightX(x, y);
+      //   xend = getNextDarkX(x, y);
+      //   break;
+      // case 2:
+      //   x = getFirstNotWhiteX(x, y);
+      //   xend = getNextWhiteX(x, y);
+      //   break;
+      // default:
+      //   break;
+      //}
 
       if (x < 0) break;
 
@@ -327,8 +438,6 @@ export const PixelSorter: React.FC = () => {
     }
   }
 
-
-
   const sortColumn = () => {
     let width = imgSrc!.width;
     let height = imgSrc!.height;
@@ -342,22 +451,22 @@ export const PixelSorter: React.FC = () => {
     let yend = 0;
 
     while (yend < height - 1) {
-      switch (mode) {
-        case 0:
-          y = getFirstNotBlackY(x, y);
-          yend = getNextBlackY(x, y);
-          break;
-        // case 1:
-        //   y = getFirstBrightY(x, y);
-        //   yend = getNextDarkY(x, y);
-        //   break;
-        // case 2:
-        //   y = getFirstNotWhiteY(x, y);
-        //   yend = getNextWhiteY(x, y);
-        //   break;
-        default:
-          break;
-      }
+      // switch (mode) {
+      //   case 0:
+      y = getFirstNotBlackY(x, y);
+      yend = getNextBlackY(x, y);
+      //break;
+      // case 1:
+      //   y = getFirstBrightY(x, y);
+      //   yend = getNextDarkY(x, y);
+      //   break;
+      // case 2:
+      //   y = getFirstNotWhiteY(x, y);
+      //   yend = getNextWhiteY(x, y);
+      //   break;
+      //   default:
+      //     break;
+      // }
 
       if (y < 0) break;
 
@@ -384,7 +493,7 @@ export const PixelSorter: React.FC = () => {
   // black x
   const getFirstNotBlackX = (x: number, y: number) => {
     let iRow = y * imgSrc!.width;
-    while (imgPixels[x + iRow] < blackValue) {
+    while (imgPixels[x + iRow] < getBlackValue()) {
       x++;
       if (x >= imgSrc!.width)
         return -1;
@@ -396,7 +505,7 @@ export const PixelSorter: React.FC = () => {
   const getNextBlackX = (x: number, y: number) => {
     x++;
     let iRow = y * imgSrc!.width;
-    while (imgPixels[x + iRow] > blackValue) {
+    while (imgPixels[x + iRow] > getBlackValue()) {
       x++;
       if (x >= imgSrc!.width)
         return imgSrc!.width - 1;
@@ -408,7 +517,7 @@ export const PixelSorter: React.FC = () => {
   // black y
   const getFirstNotBlackY = (x: number, y: number) => {
     if (y < imgSrc!.height) {
-      while (imgPixels[x + y * imgSrc!.width] < blackValue) {
+      while (imgPixels[x + y * imgSrc!.width] < getBlackValue()) {
         y++;
         if (y >= imgSrc!.height)
           return -1;
@@ -421,7 +530,7 @@ export const PixelSorter: React.FC = () => {
   const getNextBlackY = (x: number, y: number) => {
     y++;
     if (y < imgSrc!.height) {
-      while (imgPixels[x + y * imgSrc!.width] > blackValue) {
+      while (imgPixels[x + y * imgSrc!.width] > getBlackValue()) {
         y++;
         if (y >= imgSrc!.height)
           return imgSrc!.height - 1;
@@ -538,47 +647,54 @@ export const PixelSorter: React.FC = () => {
   //   return (((col >> 16) & 255) + ((col >> 8) & 255) + (col & 255)) / 3;
   // }
 
-
   return (
-    <div>
-      <h1>Pixel Sorter</h1>
-      <div {...getRootProps()}>
-        <input {...getInputProps()} />
-        {
-          isDragActive ?
-            <p>Drop the files here ...</p> :
-            <p>Drag 'n' drop some files here, or click to select files</p>
-        }
-      </div>
-      <div ref={p5ParentRef}></div>
-      {isImageLoaded && (
-        <DownloadButton
-          onClick={handleSaveImage}
-        >
-          Save Image
-        </DownloadButton>
-      )}
-      {isImageLoaded && (
-        <SortButton
-          onClick={handleSortPixels}
-        >
-          Sort Pixels
-        </SortButton>
-      )}
-      <div style={{ marginBottom: '1rem' }}>
-        <label>
-          Threshold: {threshold}
-          <input
-            type="range"
-            min="0"
-            max="255"
-            value={threshold}
-            onChange={handleThresholdChange}
-          />
-        </label>
+    <div style={{ padding: '2rem' }}>
+      <h1 style={{ marginBottom: '1.5rem' }}>Pixel Sorter</h1>
+
+      <div style={{ display: 'flex', gap: '2rem' }}>
+        {/* Left column: Controls */}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem', minWidth: '250px' }}>
+          <div /* Dropzone */
+            {...getRootProps()}
+            style={{
+              padding: '1rem',
+              border: '2px dashed #ccc',
+              borderRadius: '8px',
+              textAlign: 'center',
+              cursor: 'pointer',
+            }}
+          >
+            <input {...getInputProps()} />
+            {isDragActive ? (
+              <p>Drop the files here ...</p>
+            ) : (
+              <p>Drag 'n' drop an image here, or click to select</p>
+            )}
+          </div>
+
+          {isImageLoaded && (
+            <>
+              <StyledButton onClick={handleSortPixels}>Sort Pixels</StyledButton>
+              <StyledButton onClick={handleSaveImage}>Save Image</StyledButton>
+              <ThresholdControl threshold={threshold} onThresholdChange={handleThresholdChange} />
+              <SortOrderToggle
+                rows={sortOptions.rows}
+                columns={sortOptions.columns}
+                onToggle={handleToggleSortOption}
+              />
+            </>
+          )}
+        </div>
+
+        {/* Right column: Canvas */}
+        <div className="canvas-container">
+          <div ref={p5ParentRef}></div>
+          <div style={{ marginTop: '1rem' }}>
+            <h3>Threshold Mask Preview</h3>
+            <div ref={maskCanvasRef}></div>
+          </div>
+        </div>
       </div>
     </div>
   );
 }
-
-export default PixelSorter;
