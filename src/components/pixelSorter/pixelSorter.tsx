@@ -35,6 +35,11 @@ export const PixelSorter: React.FC = () => {
 
   const sortImagePixelsDebounceDelayMs = 200;
 
+  type SortDirection = 'orthogonal' | 'diagonal' | 'reverse-diagonal';
+
+  const [sortDirection, setSortDirection] = useState<SortDirection>('orthogonal');
+
+
   let imgPixels: number[] = [];    // packed RGB of sorted image
 
   // threshold values to determine sorting start and end pixels
@@ -277,29 +282,35 @@ export const PixelSorter: React.FC = () => {
     }
   };
 
+  // SORT
   const sortImagePixels = () => {
     imgPixels = imgSrcPixelsOriginal.current.slice();
 
-    if (sortOptions.rows.enabled && sortOptions.rows.order === 1) {
-      // Sort rows first
-      console.log("1 SORTING rows");
-      halfSort(true);
-      if (sortOptions.columns.enabled) {
-        console.log("2 SORTING cols");
-        halfSort(false);
-      }
-    }
-    if (sortOptions.columns.enabled && sortOptions.columns.order === 1) {
-      // Sort columns first
-      console.log("1 SORTING cols");
-      halfSort(false);
-      if (sortOptions.rows.enabled) {
-        console.log("2 SORTING rows");
+    if (sortDirection == 'orthogonal') {
+      if (sortOptions.rows.enabled && sortOptions.rows.order === 1) {
+        // Sort rows first
+        console.log("1 SORTING rows");
         halfSort(true);
+        if (sortOptions.columns.enabled) {
+          console.log("2 SORTING cols");
+          halfSort(false);
+        }
       }
-    }
-    if (!sortOptions.rows.enabled && !sortOptions.columns.enabled) {
-      console.error("Invalid mode.");
+      if (sortOptions.columns.enabled && sortOptions.columns.order === 1) {
+        // Sort columns first
+        console.log("1 SORTING cols");
+        halfSort(false);
+        if (sortOptions.rows.enabled) {
+          console.log("2 SORTING rows");
+          halfSort(true);
+        }
+      }
+      if (!sortOptions.rows.enabled && !sortOptions.columns.enabled) {
+        console.error("Invalid mode.");
+      }
+    } else if (sortDirection == 'diagonal') {
+      console.log("SORTING diagonal");
+      sortDiagonal();
     }
 
     let imageBytes = 4 * (imgSrc!.width * imgSrc!.height);
@@ -378,6 +389,12 @@ export const PixelSorter: React.FC = () => {
     sortImagePixelsDebounced();
   };
 
+  const handleDirectionChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
+    const value = e.target.value as SortDirection;
+    setSortDirection(value);
+  };
+
+
   const getBlackValue = () => {
     // TODO: maybe refactor to increase performance
     let byte = threshold & 255;
@@ -400,22 +417,8 @@ export const PixelSorter: React.FC = () => {
     let xend = 0;
 
     while (xend < width - 1) {
-      // switch (mode) {
-      //   case 0:
       x = getFirstNotBlackX(x, y);
       xend = getNextBlackX(x, y);
-      //break;
-      // case 1:
-      //   x = getFirstBrightX(x, y);
-      //   xend = getNextDarkX(x, y);
-      //   break;
-      // case 2:
-      //   x = getFirstNotWhiteX(x, y);
-      //   xend = getNextWhiteX(x, y);
-      //   break;
-      // default:
-      //   break;
-      //}
 
       if (x < 0) break;
 
@@ -451,22 +454,8 @@ export const PixelSorter: React.FC = () => {
     let yend = 0;
 
     while (yend < height - 1) {
-      // switch (mode) {
-      //   case 0:
       y = getFirstNotBlackY(x, y);
       yend = getNextBlackY(x, y);
-      //break;
-      // case 1:
-      //   y = getFirstBrightY(x, y);
-      //   yend = getNextDarkY(x, y);
-      //   break;
-      // case 2:
-      //   y = getFirstNotWhiteY(x, y);
-      //   yend = getNextWhiteY(x, y);
-      //   break;
-      //   default:
-      //     break;
-      // }
 
       if (y < 0) break;
 
@@ -487,6 +476,83 @@ export const PixelSorter: React.FC = () => {
 
       y = yend + 1;
     }
+  }
+  const sortDiagonal = () => {
+    // TODO: apply threshold
+    let width = imgSrc!.width;
+    let height = imgSrc!.height;
+
+    for (let d = 0; d < width + height - 2; d++) {
+      let unsorted = [];
+      //let sorted = [];
+
+      let i = 0;
+      // Limit y to optimize
+      let yStart = Math.max(0, d - width + 1);
+      let yEnd = Math.min(height - 1, d);
+      for (let y = yStart; y <= yEnd; y++) {
+        let x = d - y;
+
+        //let iRow = y * width;
+
+        if (x >= width || y >= height) {
+          throw new Error("Overflow (x,y): " + x + '' + y);
+        }
+
+        unsorted[i] = imgPixels[x + y * width];
+        i++;
+      }
+
+      // Apply threshold
+      let i_start = 0;
+      let i_end = 0;
+      while (i_end < unsorted.length - 1) {
+        i_start = getFirstNotBlackI_Modif(unsorted, i_start);
+        i_end = getNextBlackI_Modif(unsorted, i_start);
+
+        // TODO: end inclusive?
+        let sorted = unsorted.slice(i_start, i_end).sort((n1, n2) => n1 - n2);
+
+        i = 0;
+        for (let y = yStart; y <= yEnd; y++) {
+          let x = d - y;
+
+          //let iRow = y * width;
+          if (x >= width || y >= height) {
+            throw new Error("Overflow (x,y): " + x + '' + y);
+          }
+
+          if (i >= i_start && i < i_end) {
+            let i_sorted = i - i_start;
+            imgPixels[x + y * width] = sorted[i_sorted];
+          }
+          i++;
+        }
+        i_start = i_end + 1;
+      }
+    }
+  }
+
+  const getFirstNotBlackI_Modif = (pixels: number[], start_i: number) => {
+    // pixels is 1D array of extracted pixels from image
+    let i = start_i;
+    while (pixels[i] < getBlackValue()) {
+      i++; // is black
+      if (i >= imgSrc!.width)
+        return -1;
+    }
+    return i;
+  }
+
+  const getNextBlackI_Modif = (pixels: number[], start_i: number) => {
+    // pixels is 1D array of extracted pixels from image
+    let i = start_i + 1;
+    while (pixels[i] > getBlackValue()) {
+      i++; // not black
+      if (i >= imgSrc!.width)
+        return imgSrc!.width - 1;
+    }
+    return i - 1;
   }
 
 
@@ -677,11 +743,21 @@ export const PixelSorter: React.FC = () => {
               <StyledButton onClick={handleSortPixels}>Sort Pixels</StyledButton>
               <StyledButton onClick={handleSaveImage}>Save Image</StyledButton>
               <ThresholdControl threshold={threshold} onThresholdChange={handleThresholdChange} />
-              <SortOrderToggle
-                rows={sortOptions.rows}
-                columns={sortOptions.columns}
-                onToggle={handleToggleSortOption}
-              />
+              {sortDirection == 'orthogonal' &&
+                <SortOrderToggle
+                  rows={sortOptions.rows}
+                  columns={sortOptions.columns}
+                  onToggle={handleToggleSortOption}
+                />
+              }
+              <label>
+                Sort Direction:
+                <select value={sortDirection} onChange={handleDirectionChange}>
+                  <option value="orthogonal">Orthogonal (→)</option>
+                  <option value="diagonal">Diagonal (↘)</option>
+                  <option value="reverse-diagonal">Reverse Diagonal (↙)</option>
+                </select>
+              </label>
             </>
           )}
         </div>
