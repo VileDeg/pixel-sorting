@@ -16,7 +16,6 @@ export const PixelSorter: React.FC = () => {
   const [isImageLoaded, setIsImageLoaded] = useState<boolean>(false);
   const [imgSrc, setImgSrc] = useState<p5.Image | null>(null);
 
-  const [useIndividualThresholds, setUseIndividualThresholds] = useState(false);
   const [globalThreshold, setGlobalThreshold] = useState(100);  // slider value
 
   // const [sortOptions, setSortOptions] = useState({
@@ -32,7 +31,7 @@ export const PixelSorter: React.FC = () => {
   }, []);
 
 
-  const p5ParentRef = useRef<HTMLDivElement>(document.createElement('div')); //new HTMLElement
+  const p5ParentRef = useRef<HTMLDivElement>(document.createElement('div'));
   const p5Ref = useRef<p5 | null>(null);
 
   const maskCanvasRef = useRef<HTMLDivElement>(document.createElement('div'));
@@ -47,15 +46,10 @@ export const PixelSorter: React.FC = () => {
 
   type SortDirection = 'orthogonal' | 'diagonal' | 'reverse-diagonal';
 
-  const [sortDirection, setSortDirection] = useState<SortDirection>('orthogonal');
+  //const [sortDirection, setSortDirection] = useState<SortDirection>('orthogonal');
 
 
   let imgPixels: number[] = [];    // packed RGB of sorted image
-
-  // threshold values to determine sorting start and end pixels
-  // const blackValue = useRef(0xFF000000);
-  let brightnessValue;
-  let whiteValue;
 
 
   const onDrop = useCallback((acceptedFiles: Array<File>) => {
@@ -183,7 +177,7 @@ export const PixelSorter: React.FC = () => {
       let src = imgSrcPixelsOriginal.current;
 
       for (let i = 0; i < imgSrc.width * imgSrc.height; i++) {
-        const pixelValue = src[i] >= getBlackValue(globalThreshold) ? 255 : 0;
+        const pixelValue = aboveThreshold(src[i], globalThreshold) ? 255 : 0;
 
         maskImage.pixels[i * 4 + 0] = pixelValue;
         maskImage.pixels[i * 4 + 1] = pixelValue;
@@ -270,39 +264,6 @@ export const PixelSorter: React.FC = () => {
     }
   };
 
-  // const halfSort = (sortRows: boolean) => {
-  //   if (sortRows) {
-  //     row = 0;
-  //     // loop through rows
-  //     while (row < imgSrc!.height - 1) {
-  //       sortRow();
-  //       row++;
-  //     }
-  //   } else {
-  //     column = 0;
-  //     // loop through columns
-  //     while (column < imgSrc!.width - 1) {
-  //       sortColumn();
-  //       column++;
-  //     }
-  //   }
-  // };
-
-  const sortRows = (threshold: number) => {
-    let row = 0;
-    while (row < imgSrc!.height - 1) {
-      sortRow(row, threshold);
-      row++;
-    }
-  }
-
-  const sortColumns = (threshold: number) => {
-    let col = 0;
-    while (col < imgSrc!.width - 1) {
-      sortColumn(col, threshold);
-      col++;
-    }
-  }
 
   // SORT
   const sortImageWithPipeline = (pipeline: SortStep[]) => {
@@ -320,22 +281,24 @@ export const PixelSorter: React.FC = () => {
 
       let threshold = step.useLocalThreshold ? step.threshold! : globalThreshold;
 
+      let compareFn: SortCompareFn =
+        step.order === "asc" ? (n1, n2) => n1 - n2 : (n1, n2) => n2 - n1;
+
       if (step.direction === "rows") {
         console.log("SORTING rows");
-        sortRows(threshold);
+        sortRows(threshold, compareFn);
       } else if (step.direction === "columns") {
         console.log("SORTING columns");
-        sortColumns(threshold);
+        sortColumns(threshold, compareFn);
       } else if (step.direction === "diagonal") {
         console.log("SORTING diagonal");
-        sortDiagonal(threshold);
+        sortDiagonal(threshold, compareFn);
       }
     }
 
     let imageBytes = 4 * (imgSrc!.width * imgSrc!.height);
 
     // Update image pixels
-    //imgSrc!.loadPixels();
     let i = 0;
     while (i < imageBytes) {
       let col = imgPixels[Math.floor(i / 4)];
@@ -348,54 +311,6 @@ export const PixelSorter: React.FC = () => {
     // Push the changes
     imgSrc!.updatePixels();
   };
-
-  // SORT
-  // const sortImagePixels = () => {
-  //   imgPixels = imgSrcPixelsOriginal.current.slice();
-
-  //   if (sortDirection == 'orthogonal') {
-  //     if (sortOptions.rows.enabled && sortOptions.rows.order === 1) {
-  //       // Sort rows first
-  //       console.log("1 SORTING rows");
-  //       halfSort(true);
-  //       if (sortOptions.columns.enabled) {
-  //         console.log("2 SORTING cols");
-  //         halfSort(false);
-  //       }
-  //     }
-  //     if (sortOptions.columns.enabled && sortOptions.columns.order === 1) {
-  //       // Sort columns first
-  //       console.log("1 SORTING cols");
-  //       halfSort(false);
-  //       if (sortOptions.rows.enabled) {
-  //         console.log("2 SORTING rows");
-  //         halfSort(true);
-  //       }
-  //     }
-  //     if (!sortOptions.rows.enabled && !sortOptions.columns.enabled) {
-  //       console.error("Invalid mode.");
-  //     }
-  //   } else if (sortDirection == 'diagonal') {
-  //     console.log("SORTING diagonal");
-  //     sortDiagonal();
-  //   }
-
-  //   let imageBytes = 4 * (imgSrc!.width * imgSrc!.height);
-
-  //   // Update image pixels
-  //   //imgSrc!.loadPixels();
-  //   let i = 0;
-  //   while (i < imageBytes) {
-  //     let col = imgPixels[Math.floor(i / 4)];
-  //     imgSrc!.pixels[i++] = col >> 16 & 255;
-  //     imgSrc!.pixels[i++] = col >> 8 & 255;
-  //     imgSrc!.pixels[i++] = col & 255;
-  //     imgSrc!.pixels[i++] = 255;
-  //   }
-
-  //   // Push the changes
-  //   imgSrc!.updatePixels();
-  // };
 
   const sortImagePixelsDebounced =
     useDebouncedCallback(() => { sortImageWithPipeline(pipeline) }, sortImagePixelsDebounceDelayMs);
@@ -448,72 +363,85 @@ export const PixelSorter: React.FC = () => {
     sortImagePixelsDebounced();
   };
 
-  const handleDirectionChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
-    const value = e.target.value as SortDirection;
-    setSortDirection(value);
-  };
+  // const handleDirectionChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
+  //   const value = e.target.value as SortDirection;
+  //   setSortDirection(value);
+  // };
 
 
-  const getBlackValue = (threshold: number) => {
-    // TODO: maybe refactor to increase performance
-    let byte = threshold & 255;
-    // Full alpha
-    let blackValue = byte | byte << 8 | byte << 16 | 255 << 24;
-    return blackValue;
-  };
+  // const getBlackValue = (threshold: number) => {
+  //   // TODO: maybe refactor to increase performance
+  //   let byte = threshold & 255;
+  //   // Full alpha
+  //   let blackValue = byte | byte << 8 | byte << 16 | 255 << 24;
+  //   return blackValue;
+  // };
 
   const getThresholdBrighness = (threshold: number) => {
     //return threshold / 255.0;
     return threshold;
   };
 
+  type SortCompareFn = (a: number, b: number) => number;
 
-  const sortRow = (row: number, threshold: number) => {
+  const sortRows = (threshold: number, compareFn: SortCompareFn) => {
     // threshold = 0;
     let width = imgSrc!.width;
+    let height = imgSrc!.height;
 
-    let y = row;
-    let unsorted = imgPixels.slice(y * width, y * width + width);
+    let row = 0;
+    while (row < height - 1) {
 
-    // Apply threshold
-    let ranges = getThresholdedRanges(unsorted, threshold);
-    for (const [i_start, i_end] of ranges) {
-      if (threshold == 0 && (i_start != 0 || i_end != width - 1)) {
-        console.error("Invalid threshold range: ", i_start, i_end);
+
+      let y = row;
+      let unsorted = imgPixels.slice(y * width, y * width + width);
+
+      // Apply threshold
+      let ranges = getThresholdedRanges(unsorted, threshold);
+      for (const [i_start, i_end] of ranges) {
+        if (threshold == 0 && (i_start != 0 || i_end != width - 1)) {
+          console.error("Invalid threshold range: ", i_start, i_end);
+        }
+        let sorted = unsorted.slice(i_start, i_end).sort(compareFn);
+
+        for (let x = i_start; x < i_end; x++) {
+          imgPixels[y * width + x] = sorted[x - i_start];
+        }
       }
-      let sorted = unsorted.slice(i_start, i_end).sort((n1, n2) => n1 - n2);
-
-      for (let x = i_start; x < i_end; x++) {
-        imgPixels[y * width + x] = sorted[x - i_start];
-      }
+      row++;
     }
   }
 
-  const sortColumn = (column: number, threshold: number) => {
+  const sortColumns = (threshold: number, compareFn: SortCompareFn) => {
     let width = imgSrc!.width;
     let height = imgSrc!.height;
-    // current column
-    let x = column;
 
-    let unsorted = [];
-    // Can't use slice cause pixels array is row-major
-    for (let y = 0; y < height; y++) {
-      unsorted[y] = imgPixels[x + (y) * width];
-    }
+    let col = 0;
+    while (col < width) {
+      // current column
+      let x = col;
 
-    // Apply threshold
-    let ranges = getThresholdedRanges(unsorted, threshold);
-
-    for (const [i_start, i_end] of ranges) {
-      let sorted = unsorted.slice(i_start, i_end).sort((n1, n2) => n1 - n2);
-
-      for (let y = i_start; y < i_end; y++) {
-        imgPixels[x + (y) * width] = sorted[y - i_start];
+      let unsorted = [];
+      // Can't use slice cause pixels array is row-major
+      for (let y = 0; y < height; y++) {
+        unsorted[y] = imgPixels[x + (y) * width];
       }
+
+      // Apply threshold
+      let ranges = getThresholdedRanges(unsorted, threshold);
+
+      for (const [i_start, i_end] of ranges) {
+        let sorted = unsorted.slice(i_start, i_end).sort(compareFn);
+
+        for (let y = i_start; y < i_end; y++) {
+          imgPixels[x + (y) * width] = sorted[y - i_start];
+        }
+      }
+      col++;
     }
   }
 
-  const sortDiagonal = (threshold: number) => {
+  const sortDiagonal = (threshold: number, compareFn: SortCompareFn) => {
     let width = imgSrc!.width;
     let height = imgSrc!.height;
 
@@ -539,7 +467,7 @@ export const PixelSorter: React.FC = () => {
       let ranges = getThresholdedRanges(unsorted, threshold);
 
       for (const [i_start, i_end] of ranges) {
-        let sorted = unsorted.slice(i_start, i_end).sort((n1, n2) => n1 - n2);
+        let sorted = unsorted.slice(i_start, i_end).sort(compareFn);
 
         i = 0;
         for (let y = yStart; y <= yEnd; y++) {
