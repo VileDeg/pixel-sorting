@@ -4,8 +4,10 @@ import { useDropzone } from 'react-dropzone';
 import { useDebouncedCallback } from "use-debounce";
 import { StyledButton } from './styles.ts';
 
-import { SortOrderToggle } from "../sortOrderToggle/sortOrderToggle.tsx";
-import { ThresholdControl } from "../thresholdControl/thresholdControl.tsx";
+import { SortOrderToggle } from "../sortOrderToggle/sortOrderToggle";
+import { ThresholdControl } from "../common/thresholdControl/thresholdControl.tsx";
+
+import { SortStep, SortPipeline } from "../sortPipeline/sortPipeline";
 
 
 
@@ -14,12 +16,20 @@ export const PixelSorter: React.FC = () => {
   const [isImageLoaded, setIsImageLoaded] = useState<boolean>(false);
   const [imgSrc, setImgSrc] = useState<p5.Image | null>(null);
 
-  const [threshold, setThreshold] = useState(100);  // slider value
+  const [useIndividualThresholds, setUseIndividualThresholds] = useState(false);
+  const [globalThreshold, setGlobalThreshold] = useState(100);  // slider value
 
-  const [sortOptions, setSortOptions] = useState({
-    rows: { enabled: true, order: 1 },
-    columns: { enabled: true, order: 2 },
-  });
+  // const [sortOptions, setSortOptions] = useState({
+  //   rows: { enabled: true, order: 1 },
+  //   columns: { enabled: true, order: 2 },
+  // });
+
+  const [pipeline, setPipeline] = useState<SortStep[]>([]);
+
+  const handlePipelineChange = useCallback((newPipeline: SortStep[]) => {
+    setPipeline(newPipeline);
+    //sortImageWithPipeline(newPipeline); // call sorting logic here
+  }, []);
 
 
   const p5ParentRef = useRef<HTMLDivElement>(document.createElement('div')); //new HTMLElement
@@ -46,10 +56,6 @@ export const PixelSorter: React.FC = () => {
   // const blackValue = useRef(0xFF000000);
   let brightnessValue;
   let whiteValue;
-
-  let row = 0;
-  let column = 0;
-
 
 
   const onDrop = useCallback((acceptedFiles: Array<File>) => {
@@ -177,7 +183,7 @@ export const PixelSorter: React.FC = () => {
       let src = imgSrcPixelsOriginal.current;
 
       for (let i = 0; i < imgSrc.width * imgSrc.height; i++) {
-        const pixelValue = src[i] >= getBlackValue() ? 255 : 0;
+        const pixelValue = src[i] >= getBlackValue(globalThreshold) ? 255 : 0;
 
         maskImage.pixels[i * 4 + 0] = pixelValue;
         maskImage.pixels[i * 4 + 1] = pixelValue;
@@ -192,7 +198,7 @@ export const PixelSorter: React.FC = () => {
     generateMask();
 
     p.draw = () => { }; // static image
-  }, [imgSrc, threshold]); // isImageLoaded
+  }, [imgSrc, globalThreshold]); // isImageLoaded
 
 
   const populateOriginalPixels = (imgSrc: p5.Image) => {
@@ -264,53 +270,66 @@ export const PixelSorter: React.FC = () => {
     }
   };
 
-  const halfSort = (sortRows: boolean) => {
-    if (sortRows) {
-      row = 0;
-      // loop through rows
-      while (row < imgSrc!.height - 1) {
-        sortRow();
-        row++;
-      }
-    } else {
-      column = 0;
-      // loop through columns
-      while (column < imgSrc!.width - 1) {
-        sortColumn();
-        column++;
-      }
+  // const halfSort = (sortRows: boolean) => {
+  //   if (sortRows) {
+  //     row = 0;
+  //     // loop through rows
+  //     while (row < imgSrc!.height - 1) {
+  //       sortRow();
+  //       row++;
+  //     }
+  //   } else {
+  //     column = 0;
+  //     // loop through columns
+  //     while (column < imgSrc!.width - 1) {
+  //       sortColumn();
+  //       column++;
+  //     }
+  //   }
+  // };
+
+  const sortRows = (threshold: number) => {
+    let row = 0;
+    while (row < imgSrc!.height - 1) {
+      sortRow(row, threshold);
+      row++;
     }
-  };
+  }
+
+  const sortColumns = (threshold: number) => {
+    let col = 0;
+    while (col < imgSrc!.width - 1) {
+      sortColumn(col, threshold);
+      col++;
+    }
+  }
 
   // SORT
-  const sortImagePixels = () => {
+  const sortImageWithPipeline = (pipeline: SortStep[]) => {
+    // In / out buffer
     imgPixels = imgSrcPixelsOriginal.current.slice();
 
-    if (sortDirection == 'orthogonal') {
-      if (sortOptions.rows.enabled && sortOptions.rows.order === 1) {
-        // Sort rows first
-        console.log("1 SORTING rows");
-        halfSort(true);
-        if (sortOptions.columns.enabled) {
-          console.log("2 SORTING cols");
-          halfSort(false);
-        }
+    if (pipeline.length == 0) {
+      console.log("Sort pipeline is empty!");
+    }
+
+    for (const step of pipeline) {
+      console.log(
+        `Sorting: ${step.direction}, ${step.order}, threshold: ${step.threshold}`
+      );
+
+      let threshold = step.useLocalThreshold ? step.threshold! : globalThreshold;
+
+      if (step.direction === "rows") {
+        console.log("SORTING rows");
+        sortRows(threshold);
+      } else if (step.direction === "columns") {
+        console.log("SORTING columns");
+        sortColumns(threshold);
+      } else if (step.direction === "diagonal") {
+        console.log("SORTING diagonal");
+        sortDiagonal(threshold);
       }
-      if (sortOptions.columns.enabled && sortOptions.columns.order === 1) {
-        // Sort columns first
-        console.log("1 SORTING cols");
-        halfSort(false);
-        if (sortOptions.rows.enabled) {
-          console.log("2 SORTING rows");
-          halfSort(true);
-        }
-      }
-      if (!sortOptions.rows.enabled && !sortOptions.columns.enabled) {
-        console.error("Invalid mode.");
-      }
-    } else if (sortDirection == 'diagonal') {
-      console.log("SORTING diagonal");
-      sortDiagonal();
     }
 
     let imageBytes = 4 * (imgSrc!.width * imgSrc!.height);
@@ -330,59 +349,99 @@ export const PixelSorter: React.FC = () => {
     imgSrc!.updatePixels();
   };
 
+  // SORT
+  // const sortImagePixels = () => {
+  //   imgPixels = imgSrcPixelsOriginal.current.slice();
+
+  //   if (sortDirection == 'orthogonal') {
+  //     if (sortOptions.rows.enabled && sortOptions.rows.order === 1) {
+  //       // Sort rows first
+  //       console.log("1 SORTING rows");
+  //       halfSort(true);
+  //       if (sortOptions.columns.enabled) {
+  //         console.log("2 SORTING cols");
+  //         halfSort(false);
+  //       }
+  //     }
+  //     if (sortOptions.columns.enabled && sortOptions.columns.order === 1) {
+  //       // Sort columns first
+  //       console.log("1 SORTING cols");
+  //       halfSort(false);
+  //       if (sortOptions.rows.enabled) {
+  //         console.log("2 SORTING rows");
+  //         halfSort(true);
+  //       }
+  //     }
+  //     if (!sortOptions.rows.enabled && !sortOptions.columns.enabled) {
+  //       console.error("Invalid mode.");
+  //     }
+  //   } else if (sortDirection == 'diagonal') {
+  //     console.log("SORTING diagonal");
+  //     sortDiagonal();
+  //   }
+
+  //   let imageBytes = 4 * (imgSrc!.width * imgSrc!.height);
+
+  //   // Update image pixels
+  //   //imgSrc!.loadPixels();
+  //   let i = 0;
+  //   while (i < imageBytes) {
+  //     let col = imgPixels[Math.floor(i / 4)];
+  //     imgSrc!.pixels[i++] = col >> 16 & 255;
+  //     imgSrc!.pixels[i++] = col >> 8 & 255;
+  //     imgSrc!.pixels[i++] = col & 255;
+  //     imgSrc!.pixels[i++] = 255;
+  //   }
+
+  //   // Push the changes
+  //   imgSrc!.updatePixels();
+  // };
+
   const sortImagePixelsDebounced =
-    useDebouncedCallback(sortImagePixels, sortImagePixelsDebounceDelayMs);
+    useDebouncedCallback(() => { sortImageWithPipeline(pipeline) }, sortImagePixelsDebounceDelayMs);
 
   const handleSortPixels = () => {
     if (!p5Ref.current || !imgSrc) {
       console.error("handleSortPixels did not take effect: ", p5Ref.current, imgSrc);
       return;
     }
-    // Update black based on threshold
-    //setBlackValue();
-    // TODO: 
-    // Trigger rerender of image
-    //setRerenderKey(k => k + 1);
-    // console.log("handleSortPixels: imgSrc.pixels: ", imgSrc.pixels);
-    // console.log("handleSortPixels: imgSrcPixelsOriginal: ", imgSrcPixelsOriginal.current);
-
-    sortImagePixels();
+    sortImageWithPipeline(pipeline);
   }
 
-  const handleToggleSortOption = (key: 'rows' | 'columns') => {
-    setSortOptions((prev) => {
-      const current = prev[key];
-      const otherKey = key === 'rows' ? 'columns' : 'rows';
-      const other = prev[otherKey];
+  // const handleToggleSortOption = (key: 'rows' | 'columns') => {
+  //   setSortOptions((prev) => {
+  //     const current = prev[key];
+  //     const otherKey = key === 'rows' ? 'columns' : 'rows';
+  //     const other = prev[otherKey];
 
-      if (current.enabled && other.enabled) {
-        // Disable current, shift other to order 1
-        return {
-          ...prev,
-          [key]: { enabled: false, order: null },
-          [otherKey]: { ...other, order: 1 },
-        };
-      } else if (!current.enabled && !other.enabled) {
-        // Enable current as first (1)
-        return {
-          ...prev,
-          [key]: { enabled: true, order: 1 },
-        };
-      } else if (!current.enabled && other.enabled) {
-        // Enable current as second (2)
-        return {
-          ...prev,
-          [key]: { enabled: true, order: 2 },
-        };
-      } else {
-        // Disabling the only enabled one → keep at least one enabled
-        return prev;
-      }
-    });
-  };
+  //     if (current.enabled && other.enabled) {
+  //       // Disable current, shift other to order 1
+  //       return {
+  //         ...prev,
+  //         [key]: { enabled: false, order: null },
+  //         [otherKey]: { ...other, order: 1 },
+  //       };
+  //     } else if (!current.enabled && !other.enabled) {
+  //       // Enable current as first (1)
+  //       return {
+  //         ...prev,
+  //         [key]: { enabled: true, order: 1 },
+  //       };
+  //     } else if (!current.enabled && other.enabled) {
+  //       // Enable current as second (2)
+  //       return {
+  //         ...prev,
+  //         [key]: { enabled: true, order: 2 },
+  //       };
+  //     } else {
+  //       // Disabling the only enabled one → keep at least one enabled
+  //       return prev;
+  //     }
+  //   });
+  // };
 
   const handleThresholdChange = (newThreshold: number) => {
-    setThreshold(newThreshold);
+    setGlobalThreshold(newThreshold);
 
     // Auto-sort on change
     //sortImagePixels();
@@ -395,7 +454,7 @@ export const PixelSorter: React.FC = () => {
   };
 
 
-  const getBlackValue = () => {
+  const getBlackValue = (threshold: number) => {
     // TODO: maybe refactor to increase performance
     let byte = threshold & 255;
     // Full alpha
@@ -403,88 +462,63 @@ export const PixelSorter: React.FC = () => {
     return blackValue;
   };
 
+  const getThresholdBrighness = (threshold: number) => {
+    //return threshold / 255.0;
+    return threshold;
+  };
 
-  const sortRow = () => {
+
+  const sortRow = (row: number, threshold: number) => {
+    // threshold = 0;
     let width = imgSrc!.width;
-    // current row
+
     let y = row;
-    let iRow = y * width; // imgSrc!.width
+    let unsorted = imgPixels.slice(y * width, y * width + width);
 
-    // where to start sorting
-    let x = 0;
-
-    // where to stop sorting
-    let xend = 0;
-
-    while (xend < width - 1) {
-      x = getFirstNotBlackX(x, y);
-      xend = getNextBlackX(x, y);
-
-      if (x < 0) break;
-
-      let sortLength = xend - x;
-
-      let unsorted = [];
-      let sorted = [];
-
-      for (let i = 0; i < sortLength; i++) {
-        unsorted[i] = imgPixels[x + i + iRow];
+    // Apply threshold
+    let ranges = getThresholdedRanges(unsorted, threshold);
+    for (const [i_start, i_end] of ranges) {
+      if (threshold == 0 && (i_start != 0 || i_end != width - 1)) {
+        console.error("Invalid threshold range: ", i_start, i_end);
       }
+      let sorted = unsorted.slice(i_start, i_end).sort((n1, n2) => n1 - n2);
 
-      sorted = unsorted.sort((n1, n2) => n1 - n2);
-
-      for (let i = 0; i < sortLength; i++) {
-        imgPixels[x + i + iRow] = sorted[i];
+      for (let x = i_start; x < i_end; x++) {
+        imgPixels[y * width + x] = sorted[x - i_start];
       }
-
-      x = xend + 1;
     }
   }
 
-  const sortColumn = () => {
+  const sortColumn = (column: number, threshold: number) => {
     let width = imgSrc!.width;
     let height = imgSrc!.height;
     // current column
     let x = column;
 
-    // where to start sorting
-    let y = 0;
+    let unsorted = [];
+    // Can't use slice cause pixels array is row-major
+    for (let y = 0; y < height; y++) {
+      unsorted[y] = imgPixels[x + (y) * width];
+    }
 
-    // where to stop sorting
-    let yend = 0;
+    // Apply threshold
+    let ranges = getThresholdedRanges(unsorted, threshold);
 
-    while (yend < height - 1) {
-      y = getFirstNotBlackY(x, y);
-      yend = getNextBlackY(x, y);
+    for (const [i_start, i_end] of ranges) {
+      let sorted = unsorted.slice(i_start, i_end).sort((n1, n2) => n1 - n2);
 
-      if (y < 0) break;
-
-      let sortLength = yend - y;
-
-      let unsorted = [];
-      let sorted = [];
-
-      for (let i = 0; i < sortLength; i++) {
-        unsorted[i] = imgPixels[x + (y + i) * width];
+      for (let y = i_start; y < i_end; y++) {
+        imgPixels[x + (y) * width] = sorted[y - i_start];
       }
-
-      sorted = unsorted.sort((n1, n2) => n1 - n2);
-
-      for (let i = 0; i < sortLength; i++) {
-        imgPixels[x + (y + i) * width] = sorted[i];
-      }
-
-      y = yend + 1;
     }
   }
-  const sortDiagonal = () => {
-    // TODO: apply threshold
+
+  const sortDiagonal = (threshold: number) => {
     let width = imgSrc!.width;
     let height = imgSrc!.height;
 
     for (let d = 0; d < width + height - 2; d++) {
       let unsorted = [];
-      //let sorted = [];
 
       let i = 0;
       // Limit y to optimize
@@ -492,8 +526,6 @@ export const PixelSorter: React.FC = () => {
       let yEnd = Math.min(height - 1, d);
       for (let y = yStart; y <= yEnd; y++) {
         let x = d - y;
-
-        //let iRow = y * width;
 
         if (x >= width || y >= height) {
           throw new Error("Overflow (x,y): " + x + '' + y);
@@ -504,13 +536,9 @@ export const PixelSorter: React.FC = () => {
       }
 
       // Apply threshold
-      let i_start = 0;
-      let i_end = 0;
-      while (i_end < unsorted.length - 1) {
-        i_start = getFirstNotBlackI_Modif(unsorted, i_start);
-        i_end = getNextBlackI_Modif(unsorted, i_start);
+      let ranges = getThresholdedRanges(unsorted, threshold);
 
-        // TODO: end inclusive?
+      for (const [i_start, i_end] of ranges) {
         let sorted = unsorted.slice(i_start, i_end).sort((n1, n2) => n1 - n2);
 
         i = 0;
@@ -528,190 +556,76 @@ export const PixelSorter: React.FC = () => {
           }
           i++;
         }
-        i_start = i_end + 1;
       }
     }
   }
 
-  const getFirstNotBlackI_Modif = (pixels: number[], start_i: number) => {
+
+
+  const getThresholdedRanges = (pixels: number[], threshold: number) => {
     // pixels is 1D array of extracted pixels from image
-    let i = start_i;
-    while (pixels[i] < getBlackValue()) {
-      i++; // is black
-      if (i >= imgSrc!.width)
-        return -1;
-    }
-    return i;
-  }
+    let i_start = 0;
+    let i_end = 0;
 
-  const getNextBlackI_Modif = (pixels: number[], start_i: number) => {
-    // pixels is 1D array of extracted pixels from image
-    let i = start_i + 1;
-    while (pixels[i] > getBlackValue()) {
-      i++; // not black
-      if (i >= imgSrc!.width)
-        return imgSrc!.width - 1;
-    }
-    return i - 1;
-  }
+    // Array of tuples (start_i, end_i)
+    let ranges = [];
 
+    while (i_end < pixels.length - 1) {
+      // Get first not black
 
-  // black x
-  const getFirstNotBlackX = (x: number, y: number) => {
-    let iRow = y * imgSrc!.width;
-    while (imgPixels[x + iRow] < getBlackValue()) {
-      x++;
-      if (x >= imgSrc!.width)
-        return -1;
-    }
-    return x;
-  }
-
-
-  const getNextBlackX = (x: number, y: number) => {
-    x++;
-    let iRow = y * imgSrc!.width;
-    while (imgPixels[x + iRow] > getBlackValue()) {
-      x++;
-      if (x >= imgSrc!.width)
-        return imgSrc!.width - 1;
-    }
-    return x - 1;
-  }
-
-
-  // black y
-  const getFirstNotBlackY = (x: number, y: number) => {
-    if (y < imgSrc!.height) {
-      while (imgPixels[x + y * imgSrc!.width] < getBlackValue()) {
-        y++;
-        if (y >= imgSrc!.height)
-          return -1;
+      if (i_start < 0) {
+        // All values in this segment are under threshold
+        break;
       }
-    }
-    return y;
-  }
 
-
-  const getNextBlackY = (x: number, y: number) => {
-    y++;
-    if (y < imgSrc!.height) {
-      while (imgPixels[x + y * imgSrc!.width] > getBlackValue()) {
-        y++;
-        if (y >= imgSrc!.height)
-          return imgSrc!.height - 1;
+      let i = i_start;
+      while (!aboveThreshold(pixels[i], threshold)) {
+        i++; // is black
+        if (i >= imgSrc!.width) {
+          //console.error("getThresholdedRanges: overflow");
+          i_start = -1;
+          break;
+        }
       }
+      i_start = i;
+
+      // Get next black
+
+      i++;
+      while (aboveThreshold(pixels[i], threshold)) {
+        i++; // not black
+        if (i >= imgSrc!.width) {
+          i_end = imgSrc!.width - 1;
+          break;
+        }
+      }
+      i_end = i - 1;
+
+      ranges.push([i_start, i_end]);
+
+      i_start = i_end + 1;
     }
-    return y - 1;
+    return ranges;
   }
 
+  const aboveThreshold = (pixel: number, threshold: number) => {
+    let [r, g, b] = getRGB(pixel);
+    let br = getBrightness(r, g, b);
+    //return pixel >= getBlackValue(threshold);
+    return br >= getThresholdBrighness(threshold);
+  }
 
-  // brightness x
-  // const getFirstBrightX = (x: number, y: number) => {
-  //   let iRow = y * imgSrc!.width;
-  //   while (brightness2(imgPixels[x + iRow]) < brightnessValue) {
-  //     x++;
-  //     if (x >= width)
-  //       return -1;
-  //   }
-  //   return x;
-  // }
+  function getBrightness(r: number, g: number, b: number): number {
+    // Returns range 0-255
+    return 0.299 * r + 0.587 * g + 0.114 * b;
+  }
 
-
-  // const getNextDarkX(_x, _y) {
-  //   let x = _x + 1;
-  //   let y = _y;
-
-  //   let iRow = y * imgSrc!.width;
-  //   while (brightness2(imgPixels[x + iRow]) > brightnessValue) {
-  //     x++;
-  //     if (x >= width) return width - 1;
-  //   }
-  //   return x - 1;
-  // }
-
-
-  // // white x
-  // const getFirstNotWhiteX = (x: number, y: number) => {
-  //   let iRow = y * imgSrc!.width;
-  //   while (imgPixels[x + iRow] > whiteValue) {
-  //     x++;
-  //     if (x >= width)
-  //       return -1;
-  //   }
-  //   return x;
-  // }
-
-
-  // const getNextWhiteX = (x: number, y: number) => {
-  //   x++;
-  //   let iRow = y * imgSrc!.width;
-  //   while (imgPixels[x + iRow] < whiteValue) {
-  //     x++;
-  //     if (x >= width)
-  //       return width - 1;
-  //   }
-  //   return x - 1;
-  // }
-
-
-
-
-  // // brightness y
-  // const getFirstBrightY = (x: number, y: number) => {
-  //   if (y < height) {
-  //     while (brightness2(imgPixels[x + y * imgSrc!.width]) < brightnessValue) {
-  //       y++;
-  //       if (y >= height)
-  //         return -1;
-  //     }
-  //   }
-  //   return y;
-  // }
-
-
-  // const getNextDarkY = (x: number, y: number) => {
-  //   y++;
-  //   if (y < height) {
-  //     while (brightness2(imgPixels[x + y * imgSrc!.width]) > brightnessValue) {
-  //       y++;
-  //       if (y >= height)
-  //         return height - 1;
-  //     }
-  //   }
-  //   return y - 1;
-  // }
-
-
-  // // white y
-  // const getFirstNotWhiteY = (x: number, y: number) => {
-  //   if (y < height) {
-  //     while (imgPixels[x + y * imgSrc!.width] > whiteValue) {
-  //       y++;
-  //       if (y >= height)
-  //         return -1;
-  //     }
-  //   }
-  //   return y;
-  // }
-
-
-  // const getNextWhiteY = (x: number, y: number) => {
-  //   y++;
-  //   if (y < height) {
-  //     while (imgPixels[x + y * imgSrc!.width] < whiteValue) {
-  //       y++;
-  //       if (y >= height)
-  //         return height - 1;
-  //     }
-  //   }
-  //   return y - 1;
-  // }
-
-
-  // const brightness2 = (col: number) => {
-  //   return (((col >> 16) & 255) + ((col >> 8) & 255) + (col & 255)) / 3;
-  // }
+  function getRGB(px: number) {
+    let r = px & 255;
+    let g = (px >> 8) & 255;
+    let b = (px >> 16) & 255;
+    return [r, g, b];
+  }
 
   return (
     <div style={{ padding: '2rem' }}>
@@ -742,15 +656,9 @@ export const PixelSorter: React.FC = () => {
             <>
               <StyledButton onClick={handleSortPixels}>Sort Pixels</StyledButton>
               <StyledButton onClick={handleSaveImage}>Save Image</StyledButton>
-              <ThresholdControl threshold={threshold} onThresholdChange={handleThresholdChange} />
-              {sortDirection == 'orthogonal' &&
-                <SortOrderToggle
-                  rows={sortOptions.rows}
-                  columns={sortOptions.columns}
-                  onToggle={handleToggleSortOption}
-                />
-              }
-              <label>
+              <ThresholdControl threshold={globalThreshold} onThresholdChange={handleThresholdChange} />
+              <SortPipeline pipeline={pipeline} globalThreshold={globalThreshold} onPipelineChange={handlePipelineChange} />
+              {/* <label>
                 Sort Direction:
                 <select value={sortDirection} onChange={handleDirectionChange}>
                   <option value="orthogonal">Orthogonal (→)</option>
@@ -758,6 +666,14 @@ export const PixelSorter: React.FC = () => {
                   <option value="reverse-diagonal">Reverse Diagonal (↙)</option>
                 </select>
               </label>
+              {sortDirection == 'orthogonal' &&
+                <SortOrderToggle
+                  rows={sortOptions.rows}
+                  columns={sortOptions.columns}
+                  onToggle={handleToggleSortOption}
+                />
+              } */}
+
             </>
           )}
         </div>
@@ -765,10 +681,14 @@ export const PixelSorter: React.FC = () => {
         {/* Right column: Canvas */}
         <div className="canvas-container">
           <div ref={p5ParentRef}></div>
-          <div style={{ marginTop: '1rem' }}>
-            <h3>Threshold Mask Preview</h3>
-            <div ref={maskCanvasRef}></div>
-          </div>
+
+          <details open>
+            <summary>Click to expand</summary>
+            <div className="content" style={{ marginTop: '1rem' }}>
+              <h3>Threshold Mask Preview</h3>
+              <div ref={maskCanvasRef}></div>
+            </div>
+          </details>
         </div>
       </div>
     </div>
