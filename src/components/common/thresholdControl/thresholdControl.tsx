@@ -1,13 +1,14 @@
 import { useState, useRef } from 'react';
 
-import { ThresholdLabel, ThresholdInput, RangeSlider } from "./styles";
+//import { ThresholdLabel, ThresholdInput, RangeSlider } from "./styles";
 
 interface ThresholdControlProps {
+  name: string;
   threshold: number;
   onThresholdChange: (newThreshold: number) => void;
 }
 
-export const ThresholdControl: React.FC<ThresholdControlProps> = ({ threshold, onThresholdChange }) => {
+export const ThresholdControl: React.FC<ThresholdControlProps> = ({ name, threshold, onThresholdChange }) => {
   const [editing, setEditing] = useState<boolean>(false);
   const inputRef = useRef<HTMLInputElement>(null);
 
@@ -82,7 +83,7 @@ export const ThresholdControl: React.FC<ThresholdControlProps> = ({ threshold, o
           />
         ) : (
           <span onDoubleClick={handleDoubleClick} title="Double-click to edit threshold">
-            Threshold: {threshold}
+            {name}: {threshold}
           </span>
         )}
         <input

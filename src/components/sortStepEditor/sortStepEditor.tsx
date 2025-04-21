@@ -70,7 +70,7 @@ export const SortStepEditor: React.FC<Props> = ({ step, index, onUpdate, onRemov
         Use custom threshold
       </label>
       {step.useLocalThreshold &&
-        <ThresholdControl threshold={step.threshold!} onThresholdChange={handleThresholdChange}
+        <ThresholdControl name="Threshold" threshold={step.threshold!} onThresholdChange={handleThresholdChange}
         />}
       {/* 
       <ThresholdLabel
