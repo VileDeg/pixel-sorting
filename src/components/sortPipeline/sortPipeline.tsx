@@ -38,7 +38,7 @@ export const SortPipeline: React.FC<SortPipelineProps> = ({ pipeline, globalThre
       ...pipeline,
       {
         id: uuidv4(),
-        direction: "rows",
+        direction: "rows", // TODO: enums?
         order: "asc",
         useLocalThreshold: false,
         threshold: globalThreshold,
