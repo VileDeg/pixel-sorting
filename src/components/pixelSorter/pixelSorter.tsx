@@ -1,13 +1,29 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
+import { v4 as uuidv4 } from "uuid";
 import p5 from 'p5';
 import { useDropzone } from 'react-dropzone';
 import { useDebouncedCallback } from "use-debounce";
-import { StyledButton } from './styles.ts';
+import { StyledButton, ToggleButton, ToggleButtonGroup, PreviewContainer, PreviewCaption, CanvasWrapper, CollapsiblePreview, CollapsibleSummary, CollapsibleContent, } from './styles.ts';
 
-import { SortOrderToggle } from "../sortOrderToggle/sortOrderToggle";
 import { ThresholdControl } from "../common/thresholdControl/thresholdControl.tsx";
 
 import { SortStep, SortPipeline } from "../sortPipeline/sortPipeline";
+
+import {
+  sobelEdgeDetection,
+  generateGaussianKernel,
+  applyGaussianBlurDynamic,
+  replicatePad,
+  unpad,
+  toGrayscale,
+  aboveThreshold,
+} from '../../utils/image.ts';
+
+import {
+  getArrayRow,
+  getArrayColumn,
+  getArrayDiagonal,
+} from '../../utils/array.ts';
 
 type GaussKernelParams = {
   size: number; // odd, int
@@ -20,13 +36,14 @@ export const PixelSorter: React.FC = () => {
   // p5.Image of the uploaded image to be sorted
   const [imgSrc, setImgSrc] = useState<p5.Image | null>(null);
   // p5.Image of edge map
-  const [sobelImgSrc, setSobelImgSrc] = useState<p5.Image | null>(null);
+  //const [sobelImgSrc, setSobelImgSrc] = useState<p5.Image | null>(null);
 
   const [globalThreshold, setGlobalThreshold] = useState(100);  // slider value
-  const [sobelMagThreshold, setSobelMagThreshold] = useState(100);  // slider value
+  //const [sobelMagThreshold, setSobelMagThreshold] = useState(100);  // slider value
 
-  const [useSobel, setUseSobel] = useState<boolean>(true);
+  const [useEdgeDetection, setUseEdgeDetection] = useState<boolean>(true);
   const [gaussKernelParams, setGaussKernelParams] = useState<GaussKernelParams>({ size: 5, sigma: 1.0 })
+
   const handleSizeChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     let value = parseInt(e.target.value, 10);
     if (value % 2 === 0) value += 1; // ensure it's odd
@@ -36,12 +53,16 @@ export const PixelSorter: React.FC = () => {
   const handleSigmaChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     setGaussKernelParams(prev => ({ ...prev, sigma: parseFloat(e.target.value) }));
   };
-  // const [sortOptions, setSortOptions] = useState({
-  //   rows: { enabled: true, order: 1 },
-  //   columns: { enabled: true, order: 2 },
-  // });
 
-  const [pipeline, setPipeline] = useState<SortStep[]>([]);
+  const [pipeline, setPipeline] = useState<SortStep[]>([
+    {
+      id: uuidv4(),
+      direction: "rows", // Horizontal sort
+      order: "asc", // Ascending order
+      threshold: globalThreshold, // Default threshold
+      useLocalThreshold: false, // Use global threshold by default
+    },
+  ]);
 
   const handlePipelineChange = useCallback((newPipeline: SortStep[]) => {
     setPipeline(newPipeline);
@@ -70,10 +91,6 @@ export const PixelSorter: React.FC = () => {
   const sobelPixels = useRef<number[]>([]); // packed RGB of sobel map (grayscale)
   const threshPixels = useRef<number[]>([]); // packed RGB of thresholded image (grayscale)
 
-
-  // type SortDirection = 'orthogonal' | 'diagonal' | 'reverse-diagonal';
-
-  //const [sortDirection, setSortDirection] = useState<SortDirection>('orthogonal');
 
   // TODO: use Float32Array
   // Does not persist after update! Is set to original pixels at start of sorting
@@ -189,8 +206,15 @@ export const PixelSorter: React.FC = () => {
 
       // TODO
       loadedImg.loadPixels(); // <- Ensure pixels are loaded BEFORE setting state
-      // populate
-      populateOriginalPixels(loadedImg);
+      // populate original pixels
+      console.log("useEffect ON IMAGE LOAD (p5)");
+      // Store original pixels in case of repeated sort
+      imgSrcPixelsOriginal.current = [];
+
+      packFromP5(imgSrcPixelsOriginal.current, loadedImg, loadedImg.width, loadedImg.height);
+
+      console.log("useEffect: imgSrc.pixels: ", loadedImg.pixels);
+      console.log("useEffect: imgSrcPixelsOriginal: ", imgSrcPixelsOriginal.current);
 
       setImgSrc(loadedImg); // Now it’s safe
       setIsImageLoaded(true);
@@ -299,7 +323,7 @@ export const PixelSorter: React.FC = () => {
       }
 
       // Control magnitude
-      if (sobelPixels.current[i] < sobelMagThreshold) {
+      if (sobelPixels.current[i] < globalThreshold) { // sobelMagThreshold
         sobelPixels.current[i] = 0; // TODO = 0xFF000000 ?
       } else {
         sobelPixels.current[i] = 255; // TODO = 0xFF0000FF ? respect alpha
@@ -318,32 +342,47 @@ export const PixelSorter: React.FC = () => {
     p.image(sobelImage, 0, 0, p.width, p.height);
 
     // Set state after pixels are loaded (why?)
-    setSobelImgSrc(sobelImage);
+    //setSobelImgSrc(sobelImage);
 
     p.draw = () => { }; // static image
-  }, [imgSrc, sobelMagThreshold, gaussKernelParams]);
+  }, [imgSrc, globalThreshold, gaussKernelParams]); //sobelMagThreshold
 
-
-  const populateOriginalPixels = (imgSrc: p5.Image) => {
-    if (!imgSrc) {
+  // UPDATE threshold mask
+  useEffect(() => {
+    if (!threshP5Ref.current || !imgSrc || !isImageLoaded) {
       return;
     }
 
-    console.log("useEffect ON IMAGE LOAD (p5)");
-    // Store original pixels in case of repeated sort
-    imgSrcPixelsOriginal.current = [];
+    const p = threshP5Ref.current;
 
-    for (let i = 0; i < 4 * (imgSrc.width * imgSrc.height); i += 4) {
-      imgSrcPixelsOriginal.current[Math.floor(i / 4)] =
-        (255 << 24) |
-        (imgSrc.pixels[i] << 16) |
-        (imgSrc.pixels[i + 1] << 8) |
-        (imgSrc.pixels[i + 2]);
+    let maskImage = p.createImage(imgSrc.width, imgSrc.height);
+    // TODO: redundant, size is already known
+    let [width, height] = getCanvasSizeForImage(maskImage);
+
+    p.resizeCanvas(width, height);
+
+    // Generate mask
+    maskImage.loadPixels();
+
+    // Compute based on original image (not sorted)
+    let srcPixels = imgSrcPixelsOriginal.current;
+
+    for (let i = 0; i < imgSrc.width * imgSrc.height; i++) {
+      // TODO: use local threshold somehow?
+      const pixelValue = aboveThreshold(srcPixels[i], globalThreshold) ? 255 : 0;
+      // Populate global thresholded pixels to be used for sorting
+      threshPixels.current[i] = pixelValue;
+
+      maskImage.pixels[i * 4 + 0] = pixelValue;
+      maskImage.pixels[i * 4 + 1] = pixelValue;
+      maskImage.pixels[i * 4 + 2] = pixelValue;
+      maskImage.pixels[i * 4 + 3] = 255;
     }
+    maskImage.updatePixels();
+    p.image(maskImage, 0, 0, p.width, p.height);
 
-    console.log("useEffect: imgSrc.pixels: ", imgSrc.pixels);
-    console.log("useEffect: imgSrcPixelsOriginal: ", imgSrcPixelsOriginal.current);
-  }
+    p.draw = () => { }; // static image
+  }, [imgSrc, globalThreshold]);
 
 
   const getCanvasSizeForImage = (img: p5.Image) => {
@@ -369,193 +408,6 @@ export const PixelSorter: React.FC = () => {
     console.log("Set canvas size: ", width, height);
 
     return [width, height];
-  }
-
-  const sobelEdgeDetection = (grayscale: Float32Array, width: number, height: number): number[] => {
-    const edgeMap = new Float32Array(width * height);
-
-    const gx = [-1, 0, 1, -2, 0, 2, -1, 0, 1];
-    const gy = [-1, -2, -1, 0, 0, 0, 1, 2, 1];
-
-    for (let y = 1; y < height - 1; y++) {
-      for (let x = 1; x < width - 1; x++) {
-        let sumX = 0;
-        let sumY = 0;
-
-        for (let ky = -1; ky <= 1; ky++) {
-          for (let kx = -1; kx <= 1; kx++) {
-            const px = x + kx;
-            const py = y + ky;
-            const weightX = gx[(ky + 1) * 3 + (kx + 1)];
-            const weightY = gy[(ky + 1) * 3 + (kx + 1)];
-            const val = grayscale[py * width + px];
-
-            sumX += val * weightX;
-            sumY += val * weightY;
-          }
-        }
-
-        const magnitude = Math.sqrt(sumX * sumX + sumY * sumY);
-        edgeMap[y * width + x] = magnitude;
-      }
-    }
-
-    return Array.from(edgeMap);
-  }
-
-  const generateGaussianKernel = (size: number, sigma: number): { kernel: number[], sum: number } => {
-    if (size % 2 === 0) {
-      throw new Error("Kernel size must be odd");
-    }
-
-    const kernel: number[] = [];
-    const half = Math.floor(size / 2);
-    const sigma2 = 2 * sigma * sigma;
-    let sum = 0;
-
-    for (let y = -half; y <= half; y++) {
-      for (let x = -half; x <= half; x++) {
-        const exponent = -(x * x + y * y) / sigma2;
-        const value = Math.exp(exponent);
-        kernel.push(value);
-        sum += value;
-      }
-    }
-
-    return { kernel, sum };
-  };
-
-  const applyGaussianBlurDynamic = (
-    grayscale: number[],
-    width: number,
-    height: number,
-    size: number,
-    kernel: number[],
-    sum: number,
-  ): Float32Array => {
-    // TODO: precompute kernel
-
-    const output = new Float32Array(width * height);
-    const half = Math.floor(size / 2);
-
-    for (let y = half; y < height - half; y++) {
-      for (let x = half; x < width - half; x++) {
-        let acc = 0;
-
-        for (let ky = -half; ky <= half; ky++) {
-          for (let kx = -half; kx <= half; kx++) {
-            const px = x + kx;
-            const py = y + ky;
-            const weight = kernel[(ky + half) * size + (kx + half)];
-            const val = grayscale[py * width + px];
-            acc += val * weight;
-          }
-        }
-
-        output[y * width + x] = acc / sum;
-      }
-    }
-
-    return output;
-  };
-  /**
- * Apply replicate padding to a 1D array representing a 2D image
- * @param arr - 1D array of numbers (row-major order)
- * @param width - Width of the 2D image
- * @param height - Height of the 2D image  
- * @param padSize - Number of pixels to pad on all sides
- * @returns Padded 1D array
- */
-  function replicatePad(arr: number[], width: number, height: number, padSize: number): number[] {
-    if (arr.length !== width * height) {
-      throw new Error("Array length must match width * height");
-    }
-
-    const paddedWidth = width + 2 * padSize;
-    const paddedHeight = height + 2 * padSize;
-    const paddedSize = paddedWidth * paddedHeight;
-
-    const padded = new Array<number>(paddedSize);
-
-    // Helper function to get index in original array
-    const getOriginal = (row: number, col: number): number => {
-      return arr[row * width + col];
-    };
-
-    // Helper function to set index in padded array
-    const setPadded = (row: number, col: number, value: number): void => {
-      padded[row * paddedWidth + col] = value;
-    };
-
-    // Copy original array to center
-    for (let i = 0; i < height; i++) {
-      for (let j = 0; j < width; j++) {
-        setPadded(padSize + i, padSize + j, getOriginal(i, j));
-      }
-    }
-
-    // Replicate top rows
-    for (let i = 0; i < padSize; i++) {
-      for (let j = padSize; j < padSize + width; j++) {
-        setPadded(i, j, getOriginal(0, j - padSize));
-      }
-    }
-
-    // Replicate bottom rows
-    for (let i = 0; i < padSize; i++) {
-      for (let j = padSize; j < padSize + width; j++) {
-        setPadded(padSize + height + i, j, getOriginal(height - 1, j - padSize));
-      }
-    }
-
-    // Replicate left columns (including corners)
-    for (let j = 0; j < padSize; j++) {
-      for (let i = 0; i < paddedHeight; i++) {
-        setPadded(i, j, padded[i * paddedWidth + padSize]);
-      }
-    }
-
-    // Replicate right columns (including corners)
-    for (let j = 0; j < padSize; j++) {
-      for (let i = 0; i < paddedHeight; i++) {
-        setPadded(i, padSize + width + j, padded[i * paddedWidth + padSize + width - 1]);
-      }
-    }
-
-    return padded;
-  }
-
-  /**
-   * Remove padding from a padded 1D array
-   * @param paddedArr - Padded 1D array
-   * @param paddedWidth - Width of the padded array
-   * @param width - Width of the original array
-   * @param height - Height of the original array
-   * @param padSize - Number of pixels that were padded on all sides
-   * @returns Unpadded 1D array
-   */
-  function unpad(paddedArr: number[], width: number, height: number, padSize: number): number[] {
-    const result = new Array<number>(width * height);
-    const paddedWidth = width + 2 * padSize;
-
-    for (let i = 0; i < height; i++) {
-      for (let j = 0; j < width; j++) {
-        const paddedIndex = (padSize + i) * paddedWidth + (padSize + j);
-        const originalIndex = i * width + j;
-        result[originalIndex] = paddedArr[paddedIndex];
-      }
-    }
-
-    return result;
-  }
-
-  const toGrayscale = (pixels: number[], width: number, height: number): number[] => {
-    let grayscale: number[] = pixels.map((val) => {
-      const [r, g, b] = getRGB(val);
-      return 0.299 * r + 0.587 * g + 0.114 * b;
-    })
-    // Only 1 byte is filled by this!
-    return grayscale;
   }
 
 
@@ -593,7 +445,7 @@ export const PixelSorter: React.FC = () => {
         `Sorting: ${step.direction}, ${step.order}, threshold: ${step.threshold}`
       );
 
-      let threshold = step.useLocalThreshold ? step.threshold! : globalThreshold;
+      //let threshold = step.useLocalThreshold ? step.threshold! : globalThreshold;
 
       let compareFn: SortCompareFn =
         step.order === "asc" ? (n1, n2) => n1 - n2 : (n1, n2) => n2 - n1;
@@ -610,19 +462,10 @@ export const PixelSorter: React.FC = () => {
       }
     }
 
-    // Update image pixels
-    let i = 0;
-    while (i < 4 * imgSrc!.width * imgSrc!.height) {
-      let col = imgPixels[Math.floor(i / 4)];
-      imgSrc!.pixels[i++] = col >> 16 & 255;
-      imgSrc!.pixels[i++] = col >> 8 & 255;
-      imgSrc!.pixels[i++] = col & 255;
-      imgSrc!.pixels[i++] = 255;
-    }
-
-    // Push the changes
-    imgSrc!.updatePixels();
+    unpackToP5Update(imgSrc!, imgPixels, imgSrc!.width, imgSrc!.height);
   };
+
+
 
   const sortImagePixelsDebounced =
     useDebouncedCallback(() => { sortImageWithPipeline(pipeline) }, sortImagePixelsDebounceDelayMs);
@@ -635,29 +478,12 @@ export const PixelSorter: React.FC = () => {
     sortImageWithPipeline(pipeline);
   }
 
-
   const handleGlobalThresholdChange = (newThreshold: number) => {
     setGlobalThreshold(newThreshold);
 
-    // Auto-sort on change
-    //sortImagePixels();
     sortImagePixelsDebounced();
   };
 
-  const handleSobelMagThresholdChange = (newThreshold: number) => {
-    setSobelMagThreshold(newThreshold);
-
-    // Auto-sort on change
-    //sortImagePixels();
-    sortImagePixelsDebounced();
-  };
-
-
-
-  const getThresholdBrighness = (threshold: number) => {
-    //return threshold / 255.0;
-    return threshold;
-  };
 
   type SortCompareFn = (a: number, b: number) => number;
 
@@ -679,10 +505,10 @@ export const PixelSorter: React.FC = () => {
 
       let unsorted = getArrayRow(imgPixels, y, width);
 
-      let guidingPixels = getGuidingPixels(useSobel);
+      let guidingPixels = getGuidingPixels(useEdgeDetection);
 
       guidingPixels = getArrayRow(guidingPixels, y, width);
-      if (useSobel) {
+      if (useEdgeDetection) {
         guidingPixels.map((val) => {
           return 255 - val; // Invert thresh image cause edges are white
         })
@@ -704,38 +530,6 @@ export const PixelSorter: React.FC = () => {
     }
   }
 
-  const getArrayRow = (array: number[], row: number, w: number): number[] => {
-    return array.slice(row * w, row * w + w);
-  }
-
-  const getArrayColumn = (array: number[], col: number, w: number, h: number): number[] => {
-    // Can't use slice cause pixels array is row-major
-    const result: number[] = [];
-    for (let y = 0; y < h; y++) {
-      result[y] = array[col + y * w];
-    }
-    return result;
-  }
-
-  const getArrayDiagonal = (array: number[], d: number, w: number, h: number): number[] => {
-    const result: number[] = [];
-
-    let i = 0;
-    // Limit y to optimize
-    let yStart = Math.max(0, d - w + 1);
-    let yEnd = Math.min(h - 1, d);
-    for (let y = yStart; y <= yEnd; y++) {
-      let x = d - y;
-
-      if (x >= w || y >= h) {
-        throw new Error("Overflow (x,y): " + x + '' + y);
-      }
-
-      result[i] = array[x + y * w];
-      i++;
-    }
-    return result;
-  }
 
   const sortColumns = (compareFn: SortCompareFn) => {
     let width = imgSrc!.width;
@@ -748,7 +542,7 @@ export const PixelSorter: React.FC = () => {
 
       let unsorted = getArrayColumn(imgPixels, x, width, height);
 
-      let guidingPixels = getGuidingPixels(useSobel);
+      let guidingPixels = getGuidingPixels(useEdgeDetection);
 
       guidingPixels = getArrayColumn(guidingPixels, x, width, height);
 
@@ -775,7 +569,7 @@ export const PixelSorter: React.FC = () => {
       let unsorted = getArrayDiagonal(imgPixels, d, width, height);
 
       // Apply threshold
-      let guidingPixels = getGuidingPixels(useSobel);
+      let guidingPixels = getGuidingPixels(useEdgeDetection);
 
       guidingPixels = getArrayDiagonal(guidingPixels, d, width, height);
       let ranges = getThresholdedRanges(guidingPixels);
@@ -849,24 +643,31 @@ export const PixelSorter: React.FC = () => {
     return ranges;
   };
 
-  const aboveThreshold = (pixel: number, threshold: number) => {
-    let [r, g, b] = getRGB(pixel);
-    let br = getBrightness(r, g, b);
-    //return pixel >= getBlackValue(threshold);
-    return br >= getThresholdBrighness(threshold);
-  }
+  const unpackToP5Update = (p5img: p5.Image, packed: number[], w: number, h: number) => {
+    // Update image pixels
+    let i = 0;
+    while (i < 4 * w * h) {
+      let col = packed[Math.floor(i / 4)];
+      p5img.pixels[i++] = col >> 16 & 255;
+      p5img.pixels[i++] = col >> 8 & 255;
+      p5img.pixels[i++] = col & 255;
+      p5img.pixels[i++] = 255;
+    }
 
-  function getBrightness(r: number, g: number, b: number): number {
-    // Returns range 0-255
-    return 0.299 * r + 0.587 * g + 0.114 * b;
-  }
+    // Push the changes
+    p5img.updatePixels();
+  };
 
-  function getRGB(px: number) {
-    let r = px & 255;
-    let g = (px >> 8) & 255;
-    let b = (px >> 16) & 255;
-    return [r, g, b];
-  }
+  const packFromP5 = (packed: number[], p5img: p5.Image, w: number, h: number) => {
+    for (let i = 0; i < 4 * (w * h); i += 4) {
+      packed[Math.floor(i / 4)] =
+        (255 << 24) |
+        (p5img.pixels[i] << 16) |
+        (p5img.pixels[i + 1] << 8) |
+        (p5img.pixels[i + 2]);
+    }
+  };
+
 
   return (
     <div style={{ padding: '2rem' }}>
@@ -897,17 +698,28 @@ export const PixelSorter: React.FC = () => {
             <>
               <StyledButton onClick={handleSortPixels}>Sort Pixels</StyledButton>
               <StyledButton onClick={handleSaveImage}>Save Image</StyledButton>
-              <ThresholdControl name="Threshold" threshold={globalThreshold} onThresholdChange={handleGlobalThresholdChange} />
-              <ThresholdControl name="Sobel Threshold" threshold={sobelMagThreshold} onThresholdChange={handleSobelMagThresholdChange} />
-              <label>
-                <input
-                  type="checkbox"
-                  checked={useSobel}
-                  onChange={(e) => setUseSobel(e.target.checked)}
-                />
-                Use edge detection
-              </label>
-              {useSobel &&
+              {/* Sort mode toggle */
+                <ToggleButtonGroup>
+                  <ToggleButton
+                    active={!useEdgeDetection}
+                    onClick={() => setUseEdgeDetection(false)}
+                  >
+                    Threshold Mask
+                  </ToggleButton>
+                  <ToggleButton
+                    active={useEdgeDetection}
+                    onClick={() => setUseEdgeDetection(true)}
+                  >
+                    Edge Detection
+                  </ToggleButton>
+                </ToggleButtonGroup>
+              }
+              <ThresholdControl name={useEdgeDetection ? "Edge Map Threshold" : "Threshold"} threshold={globalThreshold} onThresholdChange={handleGlobalThresholdChange} />
+              {/* {useEdgeDetection &&
+                <ThresholdControl name="Sobel Threshold" threshold={sobelMagThreshold}
+                  onThresholdChange={handleSobelMagThresholdChange} />
+              } */}
+              {useEdgeDetection &&
                 <div style={{ display: "flex", flexDirection: "column", gap: "1em" }}>
                   <label>
                     Kernel Size (odd):
@@ -936,44 +748,36 @@ export const PixelSorter: React.FC = () => {
                 </div>
               }
               <SortPipeline pipeline={pipeline} globalThreshold={globalThreshold} onPipelineChange={handlePipelineChange} />
-              {/* <label>
-                Sort Direction:
-                <select value={sortDirection} onChange={handleDirectionChange}>
-                  <option value="orthogonal">Orthogonal (→)</option>
-                  <option value="diagonal">Diagonal (↘)</option>
-                  <option value="reverse-diagonal">Reverse Diagonal (↙)</option>
-                </select>
-              </label>
-              {sortDirection == 'orthogonal' &&
-                <SortOrderToggle
-                  rows={sortOptions.rows}
-                  columns={sortOptions.columns}
-                  onToggle={handleToggleSortOption}
-                />
-              } */}
-
             </>
           )}
         </div>
 
-        {/* Right column: Canvas */}
+        {/* Previews */}
         <div className="canvas-container">
-          <div ref={p5ParentRef}></div>
+          <PreviewContainer>
+            <PreviewCaption>Result</PreviewCaption>
+            <CanvasWrapper>
+              <div ref={p5ParentRef}></div>
+            </CanvasWrapper>
+          </PreviewContainer>
 
-          <details>
-            <summary>Threshold Mask Preview</summary>
-            <div className="content" style={{ marginTop: '1rem' }}>
-              {/* <h3>Threshold Mask Preview</h3> */}
-              <div ref={threshCanvasRef}></div>
-            </div>
-          </details>
-          <details open>
-            <summary>Edge Map Preview</summary>
-            <div className="content" style={{ marginTop: '1rem' }}>
-              {/* <h3>Threshold Mask Preview</h3> */}
-              <div ref={sobelCanvasRef}></div>
-            </div>
-          </details>
+          <CollapsiblePreview isVisible={!useEdgeDetection} open>
+            <CollapsibleSummary>Threshold Mask Preview</CollapsibleSummary>
+            <CollapsibleContent>
+              <CanvasWrapper>
+                <div ref={threshCanvasRef}></div>
+              </CanvasWrapper>
+            </CollapsibleContent>
+          </CollapsiblePreview>
+
+          <CollapsiblePreview isVisible={useEdgeDetection} open>
+            <CollapsibleSummary>Edge Map Preview</CollapsibleSummary>
+            <CollapsibleContent>
+              <CanvasWrapper>
+                <div ref={sobelCanvasRef}></div>
+              </CanvasWrapper>
+            </CollapsibleContent>
+          </CollapsiblePreview>
         </div>
       </div>
     </div>
