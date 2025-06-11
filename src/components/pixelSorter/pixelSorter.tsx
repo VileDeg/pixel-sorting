@@ -66,7 +66,6 @@ export const PixelSorter: React.FC = () => {
 
   const handlePipelineChange = useCallback((newPipeline: SortStep[]) => {
     setPipeline(newPipeline);
-    //sortImageWithPipeline(newPipeline); // call sorting logic here
   }, []);
 
 
@@ -84,17 +83,17 @@ export const PixelSorter: React.FC = () => {
   const defaultCanvasSize = [200, 200];
   const maxCanvasSize = [640, 640];
 
-  const imgSrcPixelsOriginal = useRef<number[]>([]); // stored imgSrc pixels to reapply sort
+  const imgSrcPixelsOriginal = useRef<Float32Array>(new Float32Array()); // stored imgSrc pixels to reapply sort
 
   const sortImagePixelsDebounceDelayMs = 200;
 
-  const sobelPixels = useRef<number[]>([]); // packed RGB of sobel map (grayscale)
-  const threshPixels = useRef<number[]>([]); // packed RGB of thresholded image (grayscale)
+  const sobelPixels = useRef<Float32Array>(new Float32Array()); // packed RGB of sobel map (grayscale)
+  const threshPixels = useRef<Float32Array>(new Float32Array()); // packed RGB of thresholded image (grayscale)
 
 
   // TODO: use Float32Array
   // Does not persist after update! Is set to original pixels at start of sorting
-  let imgPixels: number[] = [];    // packed RGB of sorted image
+  let imgPixels: Float32Array = new Float32Array();    // packed RGB of sorted image
 
   //let threshPixels: number[] = [];    // packed RGB of thresholded image (grayscale)
   //let sobelPixels: number[] = [];    // packed RGB of sobel map (grayscale)
@@ -206,12 +205,15 @@ export const PixelSorter: React.FC = () => {
 
       // TODO
       loadedImg.loadPixels(); // <- Ensure pixels are loaded BEFORE setting state
+
+      let [iw, ih] = [loadedImg.width, loadedImg.height];
+
       // populate original pixels
       console.log("useEffect ON IMAGE LOAD (p5)");
       // Store original pixels in case of repeated sort
-      imgSrcPixelsOriginal.current = [];
+      imgSrcPixelsOriginal.current = new Float32Array(iw * ih);
 
-      packFromP5(imgSrcPixelsOriginal.current, loadedImg, loadedImg.width, loadedImg.height);
+      packFromP5(imgSrcPixelsOriginal.current, loadedImg, iw, ih);
 
       console.log("useEffect: imgSrc.pixels: ", loadedImg.pixels);
       console.log("useEffect: imgSrcPixelsOriginal: ", imgSrcPixelsOriginal.current);
@@ -252,6 +254,9 @@ export const PixelSorter: React.FC = () => {
 
     // Compute based on original image (not sorted)
     let srcPixels = imgSrcPixelsOriginal.current;
+
+    // Reset array to image size
+    threshPixels.current = new Float32Array(imgSrc.width * imgSrc.height);
 
     for (let i = 0; i < imgSrc.width * imgSrc.height; i++) {
       // TODO: use local threshold somehow?
@@ -296,10 +301,8 @@ export const PixelSorter: React.FC = () => {
 
     // TODO: grayscale reduce by 3 number of 
 
-    // TODO: refactor
     // TODO: precompute kernel
     const { kernel, sum } = generateGaussianKernel(gaussKernelParams.size, gaussKernelParams.sigma);
-    // TODO: pad image with half size gauss kernel before blur?
     const half = Math.floor(gaussKernelParams.size / 2);
     grayscale = replicatePad(grayscale, w, h, half);
     const padded_w = w + 2 * half;
@@ -307,15 +310,10 @@ export const PixelSorter: React.FC = () => {
     let blurred = applyGaussianBlurDynamic(
       grayscale, padded_w, padded_h, gaussKernelParams.size, kernel, sum);
 
-    blurred = new Float32Array(unpad(Array.from(blurred), w, h, half));
+    blurred = unpad(blurred, w, h, half);
     // Set global pixels variable to be used when sorting
-    const sobel = sobelEdgeDetection(blurred, w, h);
-    //sobelPixels.current = unpad(sobel, w, h, half);
-    sobelPixels.current = sobel;
-    //console.log("SOBEL pixels: ", sobelPixels.current);
+    sobelPixels.current = sobelEdgeDetection(blurred, w, h);;
 
-    // TODO: loop range
-    //for (let i = w; i < w * h - w; i++) {
     for (let i = 0; i < w * h; i++) {
 
       if (sobelPixels.current[i] == undefined) {
@@ -383,6 +381,11 @@ export const PixelSorter: React.FC = () => {
 
     p.draw = () => { }; // static image
   }, [imgSrc, globalThreshold]);
+
+  // RE-SORT on parameters changed
+  useEffect(() => {
+    sortImagePixelsDebounced();
+  }, [globalThreshold, pipeline]);
 
 
   const getCanvasSizeForImage = (img: p5.Image) => {
@@ -480,14 +483,12 @@ export const PixelSorter: React.FC = () => {
 
   const handleGlobalThresholdChange = (newThreshold: number) => {
     setGlobalThreshold(newThreshold);
-
-    sortImagePixelsDebounced();
   };
 
 
   type SortCompareFn = (a: number, b: number) => number;
 
-  const getGuidingPixels = (useSobel: boolean): number[] => {
+  const getGuidingPixels = (useSobel: boolean): Float32Array => {
     return useSobel ?
       sobelPixels.current :
       threshPixels.current.map((val) => {
@@ -506,13 +507,16 @@ export const PixelSorter: React.FC = () => {
       let unsorted = getArrayRow(imgPixels, y, width);
 
       let guidingPixels = getGuidingPixels(useEdgeDetection);
+      console.log("*** ! sortRows guidingPixels: ", guidingPixels);
 
       guidingPixels = getArrayRow(guidingPixels, y, width);
-      if (useEdgeDetection) {
-        guidingPixels.map((val) => {
-          return 255 - val; // Invert thresh image cause edges are white
-        })
-      }
+      console.log("*** ! sortRows guidingPixels getArrayRow: ", guidingPixels);
+
+      // if (useEdgeDetection) {
+      //   guidingPixels.map((val) => {
+      //     return 255 - val; // Invert thresh image cause edges are white
+      //   })
+      // }
 
       var ranges = getThresholdedRanges(guidingPixels);
 
@@ -571,7 +575,9 @@ export const PixelSorter: React.FC = () => {
       // Apply threshold
       let guidingPixels = getGuidingPixels(useEdgeDetection);
 
+
       guidingPixels = getArrayDiagonal(guidingPixels, d, width, height);
+
       let ranges = getThresholdedRanges(guidingPixels);
 
       let yStart = Math.max(0, d - width + 1);
@@ -599,7 +605,7 @@ export const PixelSorter: React.FC = () => {
     }
   }
 
-  const getThresholdedRanges = (rowPixels: number[]): [number, number][] => {
+  const getThresholdedRanges = (rowPixels: Float32Array): [number, number][] => {
     const ranges: [number, number][] = [];
     let insideEdge = false;
     let start_i: number = 0;
@@ -643,7 +649,7 @@ export const PixelSorter: React.FC = () => {
     return ranges;
   };
 
-  const unpackToP5Update = (p5img: p5.Image, packed: number[], w: number, h: number) => {
+  const unpackToP5Update = (p5img: p5.Image, packed: Float32Array, w: number, h: number) => {
     // Update image pixels
     let i = 0;
     while (i < 4 * w * h) {
@@ -658,7 +664,7 @@ export const PixelSorter: React.FC = () => {
     p5img.updatePixels();
   };
 
-  const packFromP5 = (packed: number[], p5img: p5.Image, w: number, h: number) => {
+  const packFromP5 = (packed: Float32Array, p5img: p5.Image, w: number, h: number) => {
     for (let i = 0; i < 4 * (w * h); i += 4) {
       packed[Math.floor(i / 4)] =
         (255 << 24) |
