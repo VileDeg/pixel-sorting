@@ -3,7 +3,7 @@ import { v4 as uuidv4 } from "uuid";
 import p5 from 'p5';
 //import { useDropzone } from 'react-dropzone';
 import { useDebouncedCallback } from "use-debounce";
-import { StyledButton, ToggleButton, ToggleButtonGroup, PreviewContainer, PreviewCaption, CanvasWrapper, CollapsiblePreview, CollapsibleSummary, CollapsibleContent, } from './styles.ts';
+import { StyledButton, ToggleButton, ToggleButtonGroup, PreviewContainer, PreviewCaption, CanvasWrapper, CollapsiblePreview, CollapsibleSummary, CollapsibleContent, TooltipContainer, TooltipText, TooltipIcon } from './styles.ts';
 
 import { ThresholdControl } from "../common/thresholdControl/thresholdControl.tsx";
 
@@ -29,43 +29,25 @@ import {
 
 
 type CannyParams = {
-  blurSigma: number;
+  blurSigma: number; // Does not change anything, why?
   lowThreshold: number;
   highThreshold: number;
 };
 interface PixelSorterProps {
   imageFile: File;
+  onGoBack: () => void;
 }
 
-export const PixelSorter: React.FC<PixelSorterProps> = ({ imageFile }) => {
-  //const [imageFile, setImageFile] = useState<File | null>(null);
-  //const [isImageLoaded, setIsImageLoaded] = useState<boolean>(false);
+export const PixelSorter: React.FC<PixelSorterProps> = ({ imageFile, onGoBack }) => {
   // p5.Image of the uploaded image to be sorted
   const [imgSrc, setImgSrc] = useState<p5.Image | null>(null);
-  // p5.Image of edge map
-  //const [sobelImgSrc, setSobelImgSrc] = useState<p5.Image | null>(null);
 
   const [globalThreshold, setGlobalThreshold] = useState(100);  // slider value
-  //const [sobelMagThreshold, setSobelMagThreshold] = useState(100);  // slider value
 
   const [useEdgeDetection, setUseEdgeDetection] = useState<boolean>(true);
-  // const [gaussKernelParams, setGaussKernelParams] = useState<GaussKernelParams>({ size: 5, sigma: 1.0 })
 
   const [cannyParams, setCannyParams] = useState<CannyParams>(
     { blurSigma: 1.1, lowThreshold: 10, highThreshold: 30 })
-
-
-  const handleBlurSigmaChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    setCannyParams(prev => ({ ...prev, blurSigma: parseFloat(e.target.value) }));
-  };
-
-  const handleLowThresholdChange = (newThreshold: number) => {
-    setCannyParams(prev => ({ ...prev, lowThreshold: newThreshold }));
-  };
-
-  const handleHighThresholdChange = (newThreshold: number) => {
-    setCannyParams(prev => ({ ...prev, highThreshold: newThreshold }));
-  };
 
   const [pipeline, setPipeline] = useState<SortStep[]>([
     {
@@ -73,13 +55,9 @@ export const PixelSorter: React.FC<PixelSorterProps> = ({ imageFile }) => {
       direction: "rows", // Horizontal sort
       order: "asc", // Ascending order
       threshold: globalThreshold, // Default threshold
-      //useLocalThreshold: false, // Use global threshold by default
     },
   ]);
 
-  const handlePipelineChange = useCallback((newPipeline: SortStep[]) => {
-    setPipeline(newPipeline);
-  }, []);
 
 
   const p5ParentRef = useRef<HTMLDivElement>(document.createElement('div'));
@@ -103,27 +81,12 @@ export const PixelSorter: React.FC<PixelSorterProps> = ({ imageFile }) => {
   const threshPixels = useRef<Float32Array>(new Float32Array()); // packed RGB of thresholded image (grayscale)
 
 
-  // TODO: use Float32Array
   // Does not persist after update! Is set to original pixels at start of sorting
   let imgPixels: Float32Array = new Float32Array();    // packed RGB of sorted image
-
-  // const onDrop = useCallback((acceptedFiles: Array<File>) => {
-  //   uploadImage(acceptedFiles[0])
-  // }, [])
-
-  // const { getRootProps, getInputProps, isDragActive } = useDropzone({
-  //   onDrop, accept: {
-  //     'image/*': [],
-  //   }
-  // })
 
 
   // CREATE image canvas
   useEffect(() => {
-    // if (isImageLoaded || imageFile == null) {
-    //   return;
-    // }
-
     console.log("useEffect ON CANVAS CREATE (ATTACH TO DOM)");
 
     const sketch = (p: p5) => {
@@ -151,10 +114,6 @@ export const PixelSorter: React.FC<PixelSorterProps> = ({ imageFile }) => {
 
   // CREATE threshold mask canvas
   useEffect(() => {
-    // if (isImageLoaded || imageFile == null) {
-    //   return;
-    // }
-
     const sketch = (p: p5) => {
       p.setup = () => {
         p.pixelDensity(1);
@@ -177,10 +136,6 @@ export const PixelSorter: React.FC<PixelSorterProps> = ({ imageFile }) => {
 
   // CREATE sobel canvas
   useEffect(() => {
-    // if (isImageLoaded || imageFile == null) {
-    //   return;
-    // }
-
     const sketch = (p: p5) => {
       p.setup = () => {
         p.pixelDensity(1);
@@ -204,7 +159,7 @@ export const PixelSorter: React.FC<PixelSorterProps> = ({ imageFile }) => {
 
   // ON IMAGE UPLOAD
   useEffect(() => {
-    if (!p5Ref.current) { //  || !imageFile
+    if (!p5Ref.current) {
       return;
     }
 
@@ -336,46 +291,9 @@ export const PixelSorter: React.FC<PixelSorterProps> = ({ imageFile }) => {
     console.log("canny", image);
 
     sobelPixels.current = Float32Array.from(image.data);
-    // for (let i = 0; i < srcPixels.length; i++) {
-    //   sobelPixels.current[i] = image.data[i];
-    // }
 
-
-    //let grayscale = toGrayscale(srcPixels, w, h);
-    // Pad with half gauss kernel size, blur, unpad, get edges
-    // Padding used to avoid while border 
-    // because of kernel size mismatch between gauss and sobel
-
-    // TODO: grayscale reduce by 3 number of 
-
-    // TODO: precompute kernel
-    // const { kernel, sum } = generateGaussianKernel(gaussKernelParams.size, gaussKernelParams.sigma);
-    // const half = Math.floor(gaussKernelParams.size / 2);
-    // grayscale = replicatePad(grayscale, w, h, half);
-    // const padded_w = w + 2 * half;
-    // const padded_h = h + 2 * half;
-    // let blurred = applyGaussianBlurDynamic(
-    //   grayscale, padded_w, padded_h, gaussKernelParams.size, kernel, sum);
-
-    // blurred = unpad(blurred, w, h, half);
-    // // Set global pixels variable to be used when sorting
-    // sobelPixels.current = sobelEdgeDetection(blurred, w, h);;
 
     for (let i = 0; i < w * h; i++) {
-
-      if (false) {
-        if (sobelPixels.current[i] == undefined) {
-          sobelPixels.current[i] = 0; // black
-        }
-
-        // Control magnitude
-        if (sobelPixels.current[i] < globalThreshold) { // sobelMagThreshold
-          sobelPixels.current[i] = 0; // TODO = 0xFF000000 ?
-        } else {
-          sobelPixels.current[i] = 255; // TODO = 0xFF0000FF ? respect alpha
-        }
-      }
-
       // Assign same RGB cause its grayscale, only R is not zero
 
       sobelImage.pixels[i * 4] = sobelPixels.current[i];
@@ -464,15 +382,38 @@ export const PixelSorter: React.FC<PixelSorterProps> = ({ imageFile }) => {
 
 
 
-  // const uploadImage = (file: File | undefined) => {
-  //   if (file) {
-  //     setImageFile(file);
 
-  //     console.log("handleImageUpload: ", imageFile)
-  //   } else {
-  //     console.error("File is null");
-  //   }
-  // }
+  const handleLowThresholdChange = (newThreshold: number) => {
+    setCannyParams(prev => (
+      {
+        ...prev,
+        lowThreshold: (
+          newThreshold > cannyParams.highThreshold ?
+            cannyParams.highThreshold - 1 :
+            newThreshold
+        )
+      }
+    ));
+  };
+
+  const handleHighThresholdChange = (newThreshold: number) => {
+    setCannyParams(prev => (
+      {
+        ...prev,
+        highThreshold: (
+          newThreshold < cannyParams.lowThreshold ?
+            cannyParams.lowThreshold + 1 :
+            newThreshold
+        )
+      }
+    ));
+  };
+
+
+  const handlePipelineChange = useCallback((newPipeline: SortStep[]) => {
+    setPipeline(newPipeline);
+  }, []);
+
 
   const handleSaveImage = () => {
     if (p5Ref.current) {
@@ -496,8 +437,6 @@ export const PixelSorter: React.FC<PixelSorterProps> = ({ imageFile }) => {
       console.log(
         `Sorting: ${step.direction}, ${step.order}, threshold: ${step.threshold}`
       );
-
-      //let threshold = step.useLocalThreshold ? step.threshold! : globalThreshold;
 
       let compareFn: SortCompareFn =
         step.order === "asc" ? (n1, n2) => n1 - n2 : (n1, n2) => n2 - n1;
@@ -556,23 +495,12 @@ export const PixelSorter: React.FC<PixelSorterProps> = ({ imageFile }) => {
       let unsorted = getArrayRow(imgPixels, y, width);
 
       let guidingPixels = getGuidingPixels(useEdgeDetection);
-      //console.log("*** ! sortRows guidingPixels: ", guidingPixels);
 
       guidingPixels = getArrayRow(guidingPixels, y, width);
-      //console.log("*** ! sortRows guidingPixels getArrayRow: ", guidingPixels);
-
-      // if (useEdgeDetection) {
-      //   guidingPixels.map((val) => {
-      //     return 255 - val; // Invert thresh image cause edges are white
-      //   })
-      // }
 
       var ranges = getThresholdedRanges(guidingPixels);
 
       for (const [i_start, i_end] of ranges) {
-        // if (threshold == 0 && (i_start != 0 || i_end != width - 1)) {
-        //   console.error("Invalid threshold range: ", i_start, i_end);
-        // }
         let sorted = unsorted.slice(i_start, i_end).sort(compareFn);
 
         for (let x = i_start; x < i_end; x++) {
@@ -731,6 +659,7 @@ export const PixelSorter: React.FC<PixelSorterProps> = ({ imageFile }) => {
       <div style={{ display: 'flex', gap: '2rem' }}>
         {/* Left column: Controls */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem', minWidth: '250px' }}>
+          <StyledButton onClick={onGoBack}>Go Back</StyledButton>
           <StyledButton onClick={handleSortPixels}>Sort Pixels</StyledButton>
           <StyledButton onClick={handleSaveImage}>Save Image</StyledButton>
           {/* Sort mode toggle */
@@ -758,6 +687,17 @@ export const PixelSorter: React.FC<PixelSorterProps> = ({ imageFile }) => {
               <ThresholdControl name="Low Threshold" threshold={cannyParams.lowThreshold} onThresholdChange={handleLowThresholdChange} />
 
               <ThresholdControl name="High Threshold" threshold={cannyParams.highThreshold} onThresholdChange={handleHighThresholdChange} />
+              <TooltipContainer>
+                <TooltipIcon title="Low Threshold">?</TooltipIcon>
+                <TooltipText>
+                  <strong>High Threshold: </strong>
+                  Pixels above this threshold are classified as strong edges.<br />
+                  <strong>Low Threshold: </strong>
+                  Pixels below this threshold are classified as non-edges (or suppressed). Helps get rid of noise.<br />
+                  <strong>Between Thresholds: </strong>
+                  Pixels become edges if they are connected to strong edges.
+                </TooltipText>
+              </TooltipContainer>
 
               {/* <label>
                 Blur Sigma (σ):

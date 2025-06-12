@@ -74,3 +74,55 @@ export const CollapsibleContent = styled.div`
   align-items: center;
   gap: 0.5rem;
 `;
+
+export const TooltipContainer = styled.div`
+  position: relative;
+  display: inline-block;
+  cursor: pointer;
+`;
+
+export const TooltipText = styled.div`
+  visibility: hidden;
+  width: 200px;
+  background-color: #333;
+  color: #fff;
+  text-align: center;
+  border-radius: 5px;
+  padding: 0.5rem;
+  position: absolute;
+  z-index: 1;
+  bottom: 125%; /* Position above the icon */
+  left: 50%;
+  transform: translateX(-50%);
+  opacity: 0;
+  transition: opacity 0.3s;
+
+  /* Arrow below the tooltip */
+  &::after {
+    content: '';
+    position: absolute;
+    top: 100%; /* At the bottom of the tooltip */
+    left: 50%;
+    margin-left: -5px;
+    border-width: 5px;
+    border-style: solid;
+    border-color: #333 transparent transparent transparent;
+  }
+`;
+
+export const TooltipIcon = styled.span`
+  font-size: 1.2rem;
+  color: #555;
+  border: 1px solid #ccc;
+  border-radius: 50%;
+  padding: 0.2rem 0.4rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+
+  &:hover + ${TooltipText} {
+    visibility: visible;
+    opacity: 1;
+  }
+`;
+

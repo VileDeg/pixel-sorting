@@ -16,10 +16,14 @@ const App = () => {
     setImageFile(file);
   }
 
+  const onGoBack = () => {
+    setImageFile(null);
+  }
+
   return (
     <div>
       {imageFile != null ? (
-        <PixelSorter imageFile={imageFile} />
+        <PixelSorter imageFile={imageFile} onGoBack={onGoBack} />
       ) : (
         <UploadPage onUpload={onUpload} />
       )
