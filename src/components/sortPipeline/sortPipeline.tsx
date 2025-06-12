@@ -11,7 +11,7 @@ export type SortStep = {
   id: string;
   direction: SortDirection;
   order: SortOrder;
-  useLocalThreshold: boolean;
+  //useLocalThreshold: boolean;
   threshold?: number; // only used if useLocalThreshold is true
 };
 
@@ -40,7 +40,7 @@ export const SortPipeline: React.FC<SortPipelineProps> = ({ pipeline, globalThre
         id: uuidv4(),
         direction: "rows",
         order: "asc",
-        useLocalThreshold: false,
+        //useLocalThreshold: false,
         threshold: globalThreshold,
       },
     ]);

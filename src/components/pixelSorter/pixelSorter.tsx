@@ -1,13 +1,15 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
 import { v4 as uuidv4 } from "uuid";
 import p5 from 'p5';
-import { useDropzone } from 'react-dropzone';
+//import { useDropzone } from 'react-dropzone';
 import { useDebouncedCallback } from "use-debounce";
 import { StyledButton, ToggleButton, ToggleButtonGroup, PreviewContainer, PreviewCaption, CanvasWrapper, CollapsiblePreview, CollapsibleSummary, CollapsibleContent, } from './styles.ts';
 
 import { ThresholdControl } from "../common/thresholdControl/thresholdControl.tsx";
 
 import { SortStep, SortPipeline } from "../sortPipeline/sortPipeline";
+
+import { Image, ImageKind } from 'image-js';
 
 import {
   sobelEdgeDetection,
@@ -25,14 +27,19 @@ import {
   getArrayDiagonal,
 } from '../../utils/array.ts';
 
-type GaussKernelParams = {
-  size: number; // odd, int
-  sigma: number;
-};
 
-export const PixelSorter: React.FC = () => {
-  const [imageFile, setImageFile] = useState<File | null>(null);
-  const [isImageLoaded, setIsImageLoaded] = useState<boolean>(false);
+type CannyParams = {
+  blurSigma: number;
+  lowThreshold: number;
+  highThreshold: number;
+};
+interface PixelSorterProps {
+  imageFile: File;
+}
+
+export const PixelSorter: React.FC<PixelSorterProps> = ({ imageFile }) => {
+  //const [imageFile, setImageFile] = useState<File | null>(null);
+  //const [isImageLoaded, setIsImageLoaded] = useState<boolean>(false);
   // p5.Image of the uploaded image to be sorted
   const [imgSrc, setImgSrc] = useState<p5.Image | null>(null);
   // p5.Image of edge map
@@ -42,16 +49,22 @@ export const PixelSorter: React.FC = () => {
   //const [sobelMagThreshold, setSobelMagThreshold] = useState(100);  // slider value
 
   const [useEdgeDetection, setUseEdgeDetection] = useState<boolean>(true);
-  const [gaussKernelParams, setGaussKernelParams] = useState<GaussKernelParams>({ size: 5, sigma: 1.0 })
+  // const [gaussKernelParams, setGaussKernelParams] = useState<GaussKernelParams>({ size: 5, sigma: 1.0 })
 
-  const handleSizeChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    let value = parseInt(e.target.value, 10);
-    if (value % 2 === 0) value += 1; // ensure it's odd
-    setGaussKernelParams(prev => ({ ...prev, size: value }));
+  const [cannyParams, setCannyParams] = useState<CannyParams>(
+    { blurSigma: 1.1, lowThreshold: 10, highThreshold: 30 })
+
+
+  const handleBlurSigmaChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    setCannyParams(prev => ({ ...prev, blurSigma: parseFloat(e.target.value) }));
   };
 
-  const handleSigmaChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    setGaussKernelParams(prev => ({ ...prev, sigma: parseFloat(e.target.value) }));
+  const handleLowThresholdChange = (newThreshold: number) => {
+    setCannyParams(prev => ({ ...prev, lowThreshold: newThreshold }));
+  };
+
+  const handleHighThresholdChange = (newThreshold: number) => {
+    setCannyParams(prev => ({ ...prev, highThreshold: newThreshold }));
   };
 
   const [pipeline, setPipeline] = useState<SortStep[]>([
@@ -60,7 +73,7 @@ export const PixelSorter: React.FC = () => {
       direction: "rows", // Horizontal sort
       order: "asc", // Ascending order
       threshold: globalThreshold, // Default threshold
-      useLocalThreshold: false, // Use global threshold by default
+      //useLocalThreshold: false, // Use global threshold by default
     },
   ]);
 
@@ -72,12 +85,11 @@ export const PixelSorter: React.FC = () => {
   const p5ParentRef = useRef<HTMLDivElement>(document.createElement('div'));
   const p5Ref = useRef<p5 | null>(null);
 
-  const threshCanvasRef = useRef<HTMLDivElement>(document.createElement('div'));
-  const threshP5Ref = useRef<p5 | null>(null);
+  const maskCanvasRef = useRef<HTMLDivElement>(document.createElement('div'));
+  const maskP5Ref = useRef<p5 | null>(null);
 
-  const sobelCanvasRef = useRef<HTMLDivElement>(document.createElement('div'));
-  const sobelP5Ref = useRef<p5 | null>(null);
-
+  const edgeCanvasRef = useRef<HTMLDivElement>(document.createElement('div'));
+  const edgeP5Ref = useRef<p5 | null>(null);
 
 
   const defaultCanvasSize = [200, 200];
@@ -95,23 +107,23 @@ export const PixelSorter: React.FC = () => {
   // Does not persist after update! Is set to original pixels at start of sorting
   let imgPixels: Float32Array = new Float32Array();    // packed RGB of sorted image
 
-  //let threshPixels: number[] = [];    // packed RGB of thresholded image (grayscale)
-  //let sobelPixels: number[] = [];    // packed RGB of sobel map (grayscale)
+  // const onDrop = useCallback((acceptedFiles: Array<File>) => {
+  //   uploadImage(acceptedFiles[0])
+  // }, [])
 
-
-  const onDrop = useCallback((acceptedFiles: Array<File>) => {
-    uploadImage(acceptedFiles[0])
-  }, [])
-
-  const { getRootProps, getInputProps, isDragActive } = useDropzone({
-    onDrop, accept: {
-      'image/*': [],
-    }
-  })
+  // const { getRootProps, getInputProps, isDragActive } = useDropzone({
+  //   onDrop, accept: {
+  //     'image/*': [],
+  //   }
+  // })
 
 
   // CREATE image canvas
   useEffect(() => {
+    // if (isImageLoaded || imageFile == null) {
+    //   return;
+    // }
+
     console.log("useEffect ON CANVAS CREATE (ATTACH TO DOM)");
 
     const sketch = (p: p5) => {
@@ -135,10 +147,14 @@ export const PixelSorter: React.FC = () => {
       p5Ref.current?.remove();
       //setIsImageLoaded(false);
     };
-  }, []); // No dependency (is run just once)
+  }, []);
 
   // CREATE threshold mask canvas
   useEffect(() => {
+    // if (isImageLoaded || imageFile == null) {
+    //   return;
+    // }
+
     const sketch = (p: p5) => {
       p.setup = () => {
         p.pixelDensity(1);
@@ -150,17 +166,21 @@ export const PixelSorter: React.FC = () => {
       p.draw = () => { };
     };
 
-    threshP5Ref.current?.remove(); // Clean up previous canvas
-    threshP5Ref.current = new p5(sketch, threshCanvasRef.current);
+    maskP5Ref.current?.remove(); // Clean up previous canvas
+    maskP5Ref.current = new p5(sketch, maskCanvasRef.current);
 
 
     return () => {
-      threshP5Ref.current?.remove();
+      maskP5Ref.current?.remove();
     };
-  }, []); // No dependency (is run just once)
+  }, []);
 
   // CREATE sobel canvas
   useEffect(() => {
+    // if (isImageLoaded || imageFile == null) {
+    //   return;
+    // }
+
     const sketch = (p: p5) => {
       p.setup = () => {
         p.pixelDensity(1);
@@ -172,19 +192,19 @@ export const PixelSorter: React.FC = () => {
       p.draw = () => { };
     };
 
-    sobelP5Ref.current?.remove(); // Clean up previous canvas
-    sobelP5Ref.current = new p5(sketch, sobelCanvasRef.current);
+    edgeP5Ref.current?.remove(); // Clean up previous canvas
+    edgeP5Ref.current = new p5(sketch, edgeCanvasRef.current);
 
 
     return () => {
-      sobelP5Ref.current?.remove();
+      edgeP5Ref.current?.remove();
     };
-  }, []); // No dependency (is run just once)
+  }, []);
 
 
   // ON IMAGE UPLOAD
   useEffect(() => {
-    if (!p5Ref.current || !imageFile) {
+    if (!p5Ref.current) { //  || !imageFile
       return;
     }
 
@@ -219,7 +239,7 @@ export const PixelSorter: React.FC = () => {
       console.log("useEffect: imgSrcPixelsOriginal: ", imgSrcPixelsOriginal.current);
 
       setImgSrc(loadedImg); // Now it’s safe
-      setIsImageLoaded(true);
+      //setIsImageLoaded(true);
 
       // Override draw function to display image
       p.draw = () => {
@@ -229,19 +249,19 @@ export const PixelSorter: React.FC = () => {
 
     }, (error) => {
       console.log("Failed to load image");
-      setIsImageLoaded(false);
+      //setIsImageLoaded(false);
       URL.revokeObjectURL(imageUrl);
     });
     console.log("IMAGE LOADED: ", imgSrc);
-  }, [imageFile]);
+  }, []); // imageFile
 
   // UPDATE threshold mask
   useEffect(() => {
-    if (!threshP5Ref.current || !imgSrc || !isImageLoaded) {
+    if (!maskP5Ref.current || !imgSrc) { //  || !isImageLoaded
       return;
     }
 
-    const p = threshP5Ref.current;
+    const p = maskP5Ref.current;
 
     let maskImage = p.createImage(imgSrc.width, imgSrc.height);
     // TODO: redundant, size is already known
@@ -275,13 +295,13 @@ export const PixelSorter: React.FC = () => {
     p.draw = () => { }; // static image
   }, [imgSrc, globalThreshold]);
 
-  // UPDATE sobel map
+  // UPDATE edge map
   useEffect(() => {
-    if (!sobelP5Ref.current || !imgSrc || !isImageLoaded) {
+    if (!edgeP5Ref.current || !imgSrc) { // || !isImageLoaded
       return;
     }
 
-    const p = sobelP5Ref.current;
+    const p = edgeP5Ref.current;
 
     const w = imgSrc.width;
     const h = imgSrc.height;
@@ -292,9 +312,36 @@ export const PixelSorter: React.FC = () => {
 
     p.resizeCanvas(canvasW, canvasH);
 
-    sobelImage.loadPixels();
+    sobelImage.loadPixels(); // TODO: move down?
     let srcPixels = imgSrcPixelsOriginal.current;
-    let grayscale = toGrayscale(srcPixels, w, h);
+
+    const data = new Uint8Array(srcPixels.length * 3);
+    for (let i = 0; i < srcPixels.length; i++) {
+      const px = srcPixels[i];
+      data[i * 3] = px;
+      data[i * 3 + 1] = px >> 8;
+      data[i * 3 + 2] = px >> 16;
+      //data[i + 3] = px >> 24;
+    }
+
+    let image: Image = new Image(w, h, data, { kind: 'RGB' });
+    //console.log("image", image);
+    //console.log("data", data);
+    // To grayscale, length of data reduced x4
+    image = image.grey() // { mergeAlpha: true }
+    //console.log("grayscale", image);
+
+
+    image = image.cannyEdge(cannyParams); // default params
+    console.log("canny", image);
+
+    sobelPixels.current = Float32Array.from(image.data);
+    // for (let i = 0; i < srcPixels.length; i++) {
+    //   sobelPixels.current[i] = image.data[i];
+    // }
+
+
+    //let grayscale = toGrayscale(srcPixels, w, h);
     // Pad with half gauss kernel size, blur, unpad, get edges
     // Padding used to avoid while border 
     // because of kernel size mismatch between gauss and sobel
@@ -302,34 +349,36 @@ export const PixelSorter: React.FC = () => {
     // TODO: grayscale reduce by 3 number of 
 
     // TODO: precompute kernel
-    const { kernel, sum } = generateGaussianKernel(gaussKernelParams.size, gaussKernelParams.sigma);
-    const half = Math.floor(gaussKernelParams.size / 2);
-    grayscale = replicatePad(grayscale, w, h, half);
-    const padded_w = w + 2 * half;
-    const padded_h = h + 2 * half;
-    let blurred = applyGaussianBlurDynamic(
-      grayscale, padded_w, padded_h, gaussKernelParams.size, kernel, sum);
+    // const { kernel, sum } = generateGaussianKernel(gaussKernelParams.size, gaussKernelParams.sigma);
+    // const half = Math.floor(gaussKernelParams.size / 2);
+    // grayscale = replicatePad(grayscale, w, h, half);
+    // const padded_w = w + 2 * half;
+    // const padded_h = h + 2 * half;
+    // let blurred = applyGaussianBlurDynamic(
+    //   grayscale, padded_w, padded_h, gaussKernelParams.size, kernel, sum);
 
-    blurred = unpad(blurred, w, h, half);
-    // Set global pixels variable to be used when sorting
-    sobelPixels.current = sobelEdgeDetection(blurred, w, h);;
+    // blurred = unpad(blurred, w, h, half);
+    // // Set global pixels variable to be used when sorting
+    // sobelPixels.current = sobelEdgeDetection(blurred, w, h);;
 
     for (let i = 0; i < w * h; i++) {
 
-      if (sobelPixels.current[i] == undefined) {
-        sobelPixels.current[i] = 0; // black
+      if (false) {
+        if (sobelPixels.current[i] == undefined) {
+          sobelPixels.current[i] = 0; // black
+        }
+
+        // Control magnitude
+        if (sobelPixels.current[i] < globalThreshold) { // sobelMagThreshold
+          sobelPixels.current[i] = 0; // TODO = 0xFF000000 ?
+        } else {
+          sobelPixels.current[i] = 255; // TODO = 0xFF0000FF ? respect alpha
+        }
       }
 
-      // Control magnitude
-      if (sobelPixels.current[i] < globalThreshold) { // sobelMagThreshold
-        sobelPixels.current[i] = 0; // TODO = 0xFF000000 ?
-      } else {
-        sobelPixels.current[i] = 255; // TODO = 0xFF0000FF ? respect alpha
-      }
+      // Assign same RGB cause its grayscale, only R is not zero
 
-      // Assign same RGB cause its grayscale
-
-      sobelImage.pixels[i * 4 + 0] = sobelPixels.current[i];
+      sobelImage.pixels[i * 4] = sobelPixels.current[i];
       sobelImage.pixels[i * 4 + 1] = sobelPixels.current[i];
       sobelImage.pixels[i * 4 + 2] = sobelPixels.current[i];
       sobelImage.pixels[i * 4 + 3] = 255; // TODO: respect alpha?
@@ -343,15 +392,15 @@ export const PixelSorter: React.FC = () => {
     //setSobelImgSrc(sobelImage);
 
     p.draw = () => { }; // static image
-  }, [imgSrc, globalThreshold, gaussKernelParams]); //sobelMagThreshold
+  }, [imgSrc, globalThreshold, cannyParams]);
 
   // UPDATE threshold mask
   useEffect(() => {
-    if (!threshP5Ref.current || !imgSrc || !isImageLoaded) {
+    if (!maskP5Ref.current || !imgSrc) { //  || !isImageLoaded
       return;
     }
 
-    const p = threshP5Ref.current;
+    const p = maskP5Ref.current;
 
     let maskImage = p.createImage(imgSrc.width, imgSrc.height);
     // TODO: redundant, size is already known
@@ -385,7 +434,7 @@ export const PixelSorter: React.FC = () => {
   // RE-SORT on parameters changed
   useEffect(() => {
     sortImagePixelsDebounced();
-  }, [globalThreshold, pipeline]);
+  }, [globalThreshold, pipeline, cannyParams]);
 
 
   const getCanvasSizeForImage = (img: p5.Image) => {
@@ -415,15 +464,15 @@ export const PixelSorter: React.FC = () => {
 
 
 
-  const uploadImage = (file: File | undefined) => {
-    if (file) {
-      setImageFile(file);
+  // const uploadImage = (file: File | undefined) => {
+  //   if (file) {
+  //     setImageFile(file);
 
-      console.log("handleImageUpload: ", imageFile)
-    } else {
-      console.error("File is null");
-    }
-  }
+  //     console.log("handleImageUpload: ", imageFile)
+  //   } else {
+  //     console.error("File is null");
+  //   }
+  // }
 
   const handleSaveImage = () => {
     if (p5Ref.current) {
@@ -507,10 +556,10 @@ export const PixelSorter: React.FC = () => {
       let unsorted = getArrayRow(imgPixels, y, width);
 
       let guidingPixels = getGuidingPixels(useEdgeDetection);
-      console.log("*** ! sortRows guidingPixels: ", guidingPixels);
+      //console.log("*** ! sortRows guidingPixels: ", guidingPixels);
 
       guidingPixels = getArrayRow(guidingPixels, y, width);
-      console.log("*** ! sortRows guidingPixels getArrayRow: ", guidingPixels);
+      //console.log("*** ! sortRows guidingPixels getArrayRow: ", guidingPixels);
 
       // if (useEdgeDetection) {
       //   guidingPixels.map((val) => {
@@ -682,83 +731,48 @@ export const PixelSorter: React.FC = () => {
       <div style={{ display: 'flex', gap: '2rem' }}>
         {/* Left column: Controls */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem', minWidth: '250px' }}>
-          <div /* Dropzone */
-            {...getRootProps()}
-            style={{
-              padding: '1rem',
-              border: '2px dashed #ccc',
-              borderRadius: '8px',
-              textAlign: 'center',
-              cursor: 'pointer',
-            }}
-          >
-            <input {...getInputProps()} />
-            {isDragActive ? (
-              <p>Drop the files here ...</p>
-            ) : (
-              <p>Drag 'n' drop an image here, or click to select</p>
-            )}
-          </div>
+          <StyledButton onClick={handleSortPixels}>Sort Pixels</StyledButton>
+          <StyledButton onClick={handleSaveImage}>Save Image</StyledButton>
+          {/* Sort mode toggle */
+            <ToggleButtonGroup>
+              <ToggleButton
+                active={!useEdgeDetection}
+                onClick={() => setUseEdgeDetection(false)}
+              >
+                Threshold Mask
+              </ToggleButton>
+              <ToggleButton
+                active={useEdgeDetection}
+                onClick={() => setUseEdgeDetection(true)}
+              >
+                Edge Detection
+              </ToggleButton>
+            </ToggleButtonGroup>
+          }
+          {!useEdgeDetection &&
+            <ThresholdControl name="Threshold" threshold={globalThreshold}
+              onThresholdChange={handleGlobalThresholdChange} />
+          }
+          {useEdgeDetection &&
+            <div style={{ display: "flex", flexDirection: "column", gap: "1em" }}>
+              <ThresholdControl name="Low Threshold" threshold={cannyParams.lowThreshold} onThresholdChange={handleLowThresholdChange} />
 
-          {isImageLoaded && (
-            <>
-              <StyledButton onClick={handleSortPixels}>Sort Pixels</StyledButton>
-              <StyledButton onClick={handleSaveImage}>Save Image</StyledButton>
-              {/* Sort mode toggle */
-                <ToggleButtonGroup>
-                  <ToggleButton
-                    active={!useEdgeDetection}
-                    onClick={() => setUseEdgeDetection(false)}
-                  >
-                    Threshold Mask
-                  </ToggleButton>
-                  <ToggleButton
-                    active={useEdgeDetection}
-                    onClick={() => setUseEdgeDetection(true)}
-                  >
-                    Edge Detection
-                  </ToggleButton>
-                </ToggleButtonGroup>
-              }
-              <ThresholdControl name={useEdgeDetection ? "Edge Map Threshold" : "Threshold"} threshold={globalThreshold} onThresholdChange={handleGlobalThresholdChange} />
-              {/* {useEdgeDetection &&
-                <ThresholdControl name="Sobel Threshold" threshold={sobelMagThreshold}
-                  onThresholdChange={handleSobelMagThresholdChange} />
-              } */}
-              {useEdgeDetection &&
-                <div style={{ display: "flex", flexDirection: "column", gap: "1em" }}>
-                  <label>
-                    Kernel Size (odd):
-                    <input
-                      type="number"
-                      min={1}
-                      step={2}
-                      value={gaussKernelParams.size}
-                      onChange={handleSizeChange}
-                    />
-                  </label>
+              <ThresholdControl name="High Threshold" threshold={cannyParams.highThreshold} onThresholdChange={handleHighThresholdChange} />
 
-                  <label>
-                    Sigma (σ):
-                    <input
-                      type="number"
-                      step="0.1"
-                      value={gaussKernelParams.sigma}
-                      onChange={handleSigmaChange}
-                    />
-                  </label>
-
-                  <div>
-                    <strong>Current:</strong> size = {gaussKernelParams.size}, sigma = {gaussKernelParams.sigma}
-                  </div>
-                </div>
-              }
-              <SortPipeline pipeline={pipeline} globalThreshold={globalThreshold} onPipelineChange={handlePipelineChange} />
-            </>
-          )}
+              {/* <label>
+                Blur Sigma (σ):
+                <input
+                  type="number"
+                  step="0.1"
+                  value={cannyParams.blurSigma}
+                  onChange={handleBlurSigmaChange}
+                />
+              </label> */}
+            </div>
+          }
+          <SortPipeline pipeline={pipeline} globalThreshold={globalThreshold} onPipelineChange={handlePipelineChange} />
         </div>
 
-        {/* Previews */}
         <div className="canvas-container">
           <PreviewContainer>
             <PreviewCaption>Result</PreviewCaption>
@@ -771,7 +785,7 @@ export const PixelSorter: React.FC = () => {
             <CollapsibleSummary>Threshold Mask Preview</CollapsibleSummary>
             <CollapsibleContent>
               <CanvasWrapper>
-                <div ref={threshCanvasRef}></div>
+                <div ref={maskCanvasRef}></div>
               </CanvasWrapper>
             </CollapsibleContent>
           </CollapsiblePreview>
@@ -780,7 +794,7 @@ export const PixelSorter: React.FC = () => {
             <CollapsibleSummary>Edge Map Preview</CollapsibleSummary>
             <CollapsibleContent>
               <CanvasWrapper>
-                <div ref={sobelCanvasRef}></div>
+                <div ref={edgeCanvasRef}></div>
               </CanvasWrapper>
             </CollapsibleContent>
           </CollapsiblePreview>
@@ -789,3 +803,4 @@ export const PixelSorter: React.FC = () => {
     </div>
   );
 }
+

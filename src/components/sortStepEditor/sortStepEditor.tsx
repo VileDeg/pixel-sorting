@@ -61,17 +61,17 @@ export const SortStepEditor: React.FC<Props> = ({ step, index, onUpdate, onRemov
           </ToggleButton>
         </label>
       </div>
-      <label>
+      {/* <label>
         <input
           type="checkbox"
           checked={step.useLocalThreshold}
           onChange={(e) => onUpdate({ useLocalThreshold: e.target.checked })}
         />
         Use custom threshold
-      </label>
-      {step.useLocalThreshold &&
+      </label> */}
+      {/* {step.useLocalThreshold &&
         <ThresholdControl name="Threshold" threshold={step.threshold!} onThresholdChange={handleThresholdChange}
-        />}
+        />} */}
       {/* 
       <ThresholdLabel
         title="Double-click to enter value manually"
