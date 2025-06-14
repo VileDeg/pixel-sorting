@@ -28,4 +28,3 @@ export const TopBarButton = styled.button`
     background-color: #21a1f1;
   }
 `;
-

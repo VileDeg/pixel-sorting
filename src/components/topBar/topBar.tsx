@@ -1,6 +1,6 @@
 import React from "react";
 
-import { TopBarContainer, TopBarButton } from './styles'
+import { TopBarContainer, TopBarButton } from "./styles";
 
 interface TopBarProps {
   currentPage: "gallery" | "pixelSorter";
@@ -12,7 +12,11 @@ export const TopBar: React.FC<TopBarProps> = ({ currentPage, onNavigate }) => {
 
   return (
     <TopBarContainer>
-      <TopBarButton onClick={() => onNavigate(currentPage === "gallery" ? "pixelSorter" : "gallery")}>
+      <TopBarButton
+        onClick={() =>
+          onNavigate(currentPage === "gallery" ? "pixelSorter" : "gallery")
+        }
+      >
         {buttonLabel}
       </TopBarButton>
     </TopBarContainer>

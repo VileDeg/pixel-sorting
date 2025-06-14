@@ -1,6 +1,11 @@
 import React from "react";
 
-import { GalleryContainer, GalleryItem, ImageWrapper, ImageTitle } from './styles.ts'
+import {
+  GalleryContainer,
+  GalleryItem,
+  ImageWrapper,
+  ImageTitle
+} from "./styles.ts";
 
 interface GalleryProps {
   images: { src: string; title: string }[];

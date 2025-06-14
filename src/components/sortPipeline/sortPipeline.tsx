@@ -21,8 +21,11 @@ type SortPipelineProps = {
   onPipelineChange: (steps: SortStep[]) => void;
 };
 
-
-export const SortPipeline: React.FC<SortPipelineProps> = ({ pipeline, globalThreshold, onPipelineChange }) => {
+export const SortPipeline: React.FC<SortPipelineProps> = ({
+  pipeline,
+  globalThreshold,
+  onPipelineChange
+}) => {
   const updateStep = (id: string, updated: Partial<SortStep>) => {
     onPipelineChange(
       pipeline.map((step) => (step.id === id ? { ...step, ...updated } : step))
@@ -42,8 +45,8 @@ export const SortPipeline: React.FC<SortPipelineProps> = ({ pipeline, globalThre
         order: "asc",
         //useLocalThreshold: false,
         threshold: globalThreshold,
-        disabled: false, // Default to enabled
-      },
+        disabled: false // Default to enabled
+      }
     ]);
   };
 

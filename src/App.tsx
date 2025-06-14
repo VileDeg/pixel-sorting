@@ -7,9 +7,13 @@ import { Gallery } from "./components/galleryPage/galleryPage.tsx";
 import { TopBar } from "./components/topBar/topBar.tsx";
 
 const App = () => {
-  const [currentPage, setCurrentPage] = useState<"gallery" | "pixelSorter">("pixelSorter");
+  const [currentPage, setCurrentPage] = useState<"gallery" | "pixelSorter">(
+    "pixelSorter"
+  );
   const [imageFile, setImageFile] = useState<File | null>(null);
-  const [galleryImages, setGalleryImages] = useState<{ src: string; title: string }[]>([]);
+  const [galleryImages, setGalleryImages] = useState<
+    { src: string; title: string }[]
+  >([]);
 
   const onUpload = (file: File) => {
     setImageFile(file);
@@ -26,10 +30,12 @@ const App = () => {
   useEffect(() => {
     const imageFiles = [
       "cat_edge_rows_asc.png",
-      "lenna_edge_rows_asc.png",
-      "checkerboard_edge_cols_desc_rows_desc.png",
+      // "lenna_edge_rows_asc.png",
+      // "lenna_edge_rows_asc_cols_asc.png",
+      "lenna_edge_rows_asc_diag_asc.png",
+      "checkerboard_edge_cols_desc_rows_desc.png"
     ];
-    
+
     // Generate titles and check for duplicates
     const titleCount: Record<string, number> = {}; // Track occurrences of each title
 
@@ -46,12 +52,12 @@ const App = () => {
         return { src, title };
       }
     });
-    
+
     setGalleryImages(images);
   }, []);
 
   return (
-    <div style={{ display: 'block' }}>
+    <div style={{ display: "block" }}>
       <TopBar currentPage={currentPage} onNavigate={handleNavigate} />
       <div style={{ marginTop: "60px" }}>
         {currentPage === "gallery" ? (

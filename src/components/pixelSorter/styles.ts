@@ -1,15 +1,14 @@
 import styled from "styled-components";
-import { theme } from "../../styles/theme";
 
 export const StyledButton = styled.button`
-  padding: '10px 16px';
-  backgroundColor: '#4CAF50';
-  color: 'white';
-  border: 'none';
-  borderRadius: '4px';
-  cursor: 'pointer';
-  marginTop: '10px';
-  fontSize: '16px';
+  padding: "10px 16px";
+  backgroundcolor: "#4CAF50";
+  color: "white";
+  border: "none";
+  borderradius: "4px";
+  cursor: "pointer";
+  margintop: "10px";
+  fontsize: "16px";
 `;
 
 export const ToggleButton = styled.button<{ active: boolean }>`
@@ -54,7 +53,8 @@ export const CanvasWrapper = styled.div`
 
 export const CollapsiblePreview = styled.details<{ isVisible: boolean }>`
   width: 100%;
-  display: ${(props) => (props.isVisible ? "block" : "none")}; /* Control visibility */
+  display: ${(props) =>
+    props.isVisible ? "block" : "none"}; /* Control visibility */
 `;
 
 export const CollapsibleSummary = styled.summary`
@@ -100,7 +100,7 @@ export const TooltipText = styled.div`
 
   /* Arrow below the tooltip */
   &::after {
-    content: '';
+    content: "";
     position: absolute;
     top: 100%; /* At the bottom of the tooltip */
     left: 50%;
@@ -112,13 +112,7 @@ export const TooltipText = styled.div`
 `;
 
 export const TooltipIcon = styled.span`
-  //font-size: 1.2rem;
-  //color: #555;
-  //border: 1px solid #ccc;
-  //border-radius: 50%;
   padding: 0.2rem 0.4rem;
-  //display: inline-flex;
-  //align-self: flex-start; /* Prevents stretching */
   align-items: center;
   justify-content: center;
 
@@ -127,4 +121,3 @@ export const TooltipIcon = styled.span`
     opacity: 1;
   }
 `;
-

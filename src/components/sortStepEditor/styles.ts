@@ -30,17 +30,11 @@ export const Select = styled.select`
   padding: 0.3rem;
 `;
 
-//background-color: #eee;
-// &:hover {
-//     background-color: #ddd;
-//   }
 export const ToggleButton = styled.button`
   padding: 0.3rem 0.7rem;
   border: 1px solid #ccc;
   border-radius: 4px;
   cursor: pointer;
-
-  
 `;
 
 export const ThresholdLabel = styled.label`
