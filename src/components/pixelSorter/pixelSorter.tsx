@@ -23,6 +23,8 @@ import { SortStep, SortPipeline } from "../sortPipeline/sortPipeline";
 
 import { Image } from "image-js";
 
+import yaml from "js-yaml"; // Import YAML library
+
 import {
   getArrayRow,
   getArrayColumn,
@@ -61,7 +63,8 @@ export const PixelSorter: React.FC<PixelSorterProps> = ({
       id: uuidv4(),
       direction: "rows", // Horizontal sort
       order: "asc", // Ascending order
-      threshold: globalThreshold // Default threshold
+      disabled: false
+      //threshold: globalThreshold // Default threshold
     }
   ]);
 
@@ -86,6 +89,54 @@ export const PixelSorter: React.FC<PixelSorterProps> = ({
 
   // Does not persist after update! Is set to original pixels at start of sorting
   let imgPixels: Float32Array = new Float32Array(); // packed RGB of sorted image
+
+  // Save configuration to YAML
+  const handleSaveConfig = () => {
+    const config = {
+      globalThreshold,
+      useEdgeDetection,
+      cannyParams,
+      pipeline
+    };
+
+    const yamlConfig = yaml.dump(config);
+    const blob = new Blob([yamlConfig], { type: "text/yaml" });
+    const url = URL.createObjectURL(blob);
+
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = "pixel-sorter-config.yaml";
+    link.click();
+
+    URL.revokeObjectURL(url);
+  };
+
+  // Load configuration from YAML
+  const handleLoadConfig = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const yamlConfig = e.target?.result as string;
+      try {
+        const config = yaml.load(yamlConfig) as {
+          globalThreshold: number;
+          useEdgeDetection: boolean;
+          cannyParams: CannyParams;
+          pipeline: SortStep[];
+        };
+
+        setGlobalThreshold(config.globalThreshold);
+        setUseEdgeDetection(config.useEdgeDetection);
+        setCannyParams(config.cannyParams);
+        setPipeline(config.pipeline);
+      } catch (error) {
+        console.error("Failed to load configuration:", error);
+      }
+    };
+    reader.readAsText(file);
+  };
 
   // CREATE image canvas
   useEffect(() => {
@@ -437,7 +488,7 @@ export const PixelSorter: React.FC<PixelSorterProps> = ({
       }
 
       console.log(
-        `Sorting: ${step.direction}, ${step.order}, threshold: ${step.threshold}`
+        `Sorting: ${step.direction}, ${step.order}` // , threshold: ${step.threshold}
       );
 
       let compareFn: SortCompareFn =
@@ -705,6 +756,18 @@ export const PixelSorter: React.FC<PixelSorterProps> = ({
           <StyledButton onClick={onGoBack}>Go Back</StyledButton>
           <StyledButton onClick={handleSortPixels}>Sort Pixels</StyledButton>
           <StyledButton onClick={handleSaveImage}>Save Image</StyledButton>
+          <StyledButton onClick={handleSaveConfig}>
+            Save Configuration
+          </StyledButton>
+          <label>
+            Load Configuration:
+            <input
+              type="file"
+              accept=".yaml"
+              onChange={handleLoadConfig}
+              style={{ marginTop: "0.5rem" }}
+            />
+          </label>
           {
             /* Sort mode toggle */
             <ToggleButtonGroup>

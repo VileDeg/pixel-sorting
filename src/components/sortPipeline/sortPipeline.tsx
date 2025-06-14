@@ -11,8 +11,8 @@ export type SortStep = {
   id: string;
   direction: SortDirection;
   order: SortOrder;
-  threshold?: number; // only used if useLocalThreshold is true
-  disabled?: boolean; // New property to track if the step is disabled
+  //threshold?: number; only used if useLocalThreshold is true
+  disabled: boolean; // New property to track if the step is disabled
 };
 
 type SortPipelineProps = {
@@ -23,7 +23,7 @@ type SortPipelineProps = {
 
 export const SortPipeline: React.FC<SortPipelineProps> = ({
   pipeline,
-  globalThreshold,
+  //globalThreshold,
   onPipelineChange
 }) => {
   const updateStep = (id: string, updated: Partial<SortStep>) => {
@@ -44,7 +44,7 @@ export const SortPipeline: React.FC<SortPipelineProps> = ({
         direction: "rows",
         order: "asc",
         //useLocalThreshold: false,
-        threshold: globalThreshold,
+        //threshold: globalThreshold,
         disabled: false // Default to enabled
       }
     ]);

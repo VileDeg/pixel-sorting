@@ -30,10 +30,9 @@ const App = () => {
   useEffect(() => {
     const imageFiles = [
       "cat_edge_rows_asc.png",
-      // "lenna_edge_rows_asc.png",
-      // "lenna_edge_rows_asc_cols_asc.png",
       "lenna_edge_rows_asc_diag_asc.png",
-      "checkerboard_edge_cols_desc_rows_desc.png"
+      "checkerboard_edge_cols_desc_rows_desc.png",
+      "firewatch_rows_asc_cols_asc.png"
     ];
 
     // Generate titles and check for duplicates
