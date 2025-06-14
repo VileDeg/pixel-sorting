@@ -1,18 +1,18 @@
-import React, { useState } from "react";
+import React from "react";
 import { v4 as uuidv4 } from "uuid";
 import { SortStepEditor } from "../sortStepEditor/sortStepEditor";
 
 import { Container, AddButton } from "./styles";
 
-type SortDirection = "rows" | "columns" | "diagonal";
+type SortDirection = "rows" | "cols" | "diag";
 type SortOrder = "asc" | "desc";
 
 export type SortStep = {
   id: string;
   direction: SortDirection;
   order: SortOrder;
-  //useLocalThreshold: boolean;
   threshold?: number; // only used if useLocalThreshold is true
+  disabled?: boolean; // New property to track if the step is disabled
 };
 
 type SortPipelineProps = {
@@ -42,6 +42,7 @@ export const SortPipeline: React.FC<SortPipelineProps> = ({ pipeline, globalThre
         order: "asc",
         //useLocalThreshold: false,
         threshold: globalThreshold,
+        disabled: false, // Default to enabled
       },
     ]);
   };

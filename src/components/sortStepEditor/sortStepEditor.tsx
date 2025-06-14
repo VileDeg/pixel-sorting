@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from "react";
+import React from "react";
 
 import type { SortStep } from "../sortPipeline/sortPipeline";
 import { StepContainer, StepHeader, RemoveButton, Select, ToggleButton, ThresholdLabel, ThresholdInput, RangeSlider } from "./styles";
@@ -14,24 +14,36 @@ type Props = {
 
 
 export const SortStepEditor: React.FC<Props> = ({ step, index, onUpdate, onRemove }) => {
-  const [editingThreshold, setEditingThreshold] = useState(false);
-  const inputRef = useRef<HTMLInputElement>(null);
+  //const [editingThreshold, setEditingThreshold] = useState(false);
+  //const inputRef = useRef<HTMLInputElement>(null);
 
-  useEffect(() => {
-    if (editingThreshold && inputRef.current) {
-      inputRef.current.focus();
-    }
-  }, [editingThreshold]);
+  // useEffect(() => {
+  //   if (editingThreshold && inputRef.current) {
+  //     inputRef.current.focus();
+  //   }
+  // }, [editingThreshold]);
 
 
-  const handleThresholdChange = (newThreshold: number) => {
-    onUpdate({ threshold: newThreshold });
+  // const handleThresholdChange = (newThreshold: number) => {
+  //   onUpdate({ threshold: newThreshold });
+  // };
+
+  const handleToggleDisabled = () => {
+    onUpdate({ disabled: !step.disabled });
   };
 
   return (
     <StepContainer>
       <StepHeader>
         <strong>Step {index + 1}</strong>
+        <label>
+          <input
+            type="checkbox"
+            checked={!step.disabled}
+            onChange={handleToggleDisabled}
+          />
+          Enabled
+        </label>
         <RemoveButton onClick={onRemove}>🗑️</RemoveButton>
       </StepHeader>
 
@@ -43,10 +55,11 @@ export const SortStepEditor: React.FC<Props> = ({ step, index, onUpdate, onRemov
             onChange={(e) =>
               onUpdate({ direction: e.target.value as SortStep["direction"] })
             }
+            disabled={step.disabled} // Disable input when step is disabled
           >
             <option value="rows">Rows</option>
-            <option value="columns">Columns</option>
-            <option value="diagonal">Diagonal</option>
+            <option value="cols">Columns</option>
+            <option value="diag">Diagonal</option>
           </Select>
         </label>
 
@@ -56,6 +69,7 @@ export const SortStepEditor: React.FC<Props> = ({ step, index, onUpdate, onRemov
             onClick={() =>
               onUpdate({ order: step.order === "asc" ? "desc" : "asc" })
             }
+            disabled={step.disabled} // Disable input when step is disabled
           >
             {step.order === "asc" ? "⬆️ Ascending" : "⬇️ Descending"}
           </ToggleButton>

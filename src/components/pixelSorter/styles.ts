@@ -79,6 +79,7 @@ export const TooltipContainer = styled.div`
   position: relative;
   display: inline-block;
   cursor: pointer;
+  align-self: flex-start; /* Add this line */
 `;
 
 export const TooltipText = styled.div`
@@ -111,12 +112,13 @@ export const TooltipText = styled.div`
 `;
 
 export const TooltipIcon = styled.span`
-  font-size: 1.2rem;
-  color: #555;
-  border: 1px solid #ccc;
-  border-radius: 50%;
+  //font-size: 1.2rem;
+  //color: #555;
+  //border: 1px solid #ccc;
+  //border-radius: 50%;
   padding: 0.2rem 0.4rem;
-  display: inline-flex;
+  //display: inline-flex;
+  //align-self: flex-start; /* Prevents stretching */
   align-items: center;
   justify-content: center;
 
