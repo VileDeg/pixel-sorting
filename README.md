@@ -40,23 +40,19 @@ cd pixel-sorting
 
 Install the required dependencies using npm:
 
+```bash
+npm install
+```
+
 ### Step 3: Start the Development Server
 
 Run the development server to start the application:
 
+```bash
+npm run dev
+```
+
 This will start the application and provide a local development URL (e.g., http://localhost:3000). Open this URL in your browser to access the application.
-
-### Step 4: Build for Production (Optional)
-
-If you want to build the application for production, run:
-
-The production-ready files will be generated in the dist folder.
-
-### Step 5: Deploy (Optional)
-
-To deploy the application to GitHub Pages, use the following command:
-
-This will deploy the contents of the dist folder to your GitHub Pages site.
 
 ## File Structure
 
